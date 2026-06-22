@@ -81,6 +81,7 @@ interface State {
   enemy: EnemyToken | null;
   turn: Turn;
   movesLeft: number;
+  attacksUsed: number; // attacks taken so far this player turn
   selected: boolean;
   busy: boolean; // true during attack animations; locks input
   preview: Coord[] | null; // squares to highlight while hovering an attack
@@ -98,6 +99,7 @@ const state: State = {
   enemy: { pos: { x: 4, y: 1 }, facing: Dir.S, hp: 3, maxHp: 3 },
   turn: "player",
   movesLeft: MOVES_PER_TURN,
+  attacksUsed: 0,
   selected: false,
   busy: false,
   preview: null,
@@ -220,7 +222,8 @@ function renderWeapon(): void {
 
   for (const atk of weapon.attacks) {
     const affordable = state.player.stamina >= atk.staminaCost;
-    const usable = state.turn === "player" && !state.busy && affordable;
+    const hasUses = state.attacksUsed < atk.usesPerTurn;
+    const usable = state.turn === "player" && !state.busy && affordable && hasUses;
 
     const card = document.createElement("div");
     card.className = "attack-card" + (usable ? "" : " disabled");
@@ -234,7 +237,8 @@ function renderWeapon(): void {
 
     const stats = document.createElement("div");
     stats.className = "attack-stats";
-    stats.textContent = `${atk.damage} dmg · ${atk.staminaCost} stam`;
+    const repeat = atk.usesPerTurn > 1 ? ` · ×${atk.usesPerTurn}/turn` : "";
+    stats.textContent = `${atk.damage} dmg · ${atk.staminaCost} stam${repeat}`;
     card.appendChild(stats);
 
     if (usable) {
@@ -306,6 +310,10 @@ function rotate(left: boolean): void {
 // flash the enemy and apply damage.
 function performAttack(atk: Attack): void {
   if (state.turn !== "player" || state.busy) return;
+  if (state.attacksUsed >= atk.usesPerTurn) {
+    log("No attacks left this turn.");
+    return;
+  }
   if (state.player.stamina < atk.staminaCost) {
     log("Not enough stamina to attack.");
     return;
@@ -313,6 +321,7 @@ function performAttack(atk: Attack): void {
 
   const targets = targetSquares(atk).filter((c) => inBounds(c, WIDTH, HEIGHT));
   state.player.stamina -= atk.staminaCost;
+  state.attacksUsed += 1;
   state.busy = true;
   state.preview = null;
   state.selected = false;
@@ -353,6 +362,7 @@ function performAttack(atk: Attack): void {
 function startPlayerTurn(): void {
   state.turn = "player";
   state.movesLeft = MOVES_PER_TURN;
+  state.attacksUsed = 0;
   state.player.stamina = Math.min(
     state.player.maxStamina,
     state.player.stamina + STAMINA_REGEN

@@ -12,6 +12,9 @@ export interface Attack {
   pattern: Offset[];
   damage: number;
   staminaCost: number;
+  // How many times this attack may be used in a single player turn. Defaults
+  // to 1 (the standard one-attack-per-turn rule); repeatable attacks raise it.
+  usesPerTurn: number;
 }
 
 export interface Weapon {
@@ -23,9 +26,17 @@ function attack(
   name: string,
   diagram: string,
   damage: number,
-  staminaCost: number
+  staminaCost: number,
+  usesPerTurn = 1
 ): Attack {
-  return { name, diagram, pattern: parsePattern(diagram), damage, staminaCost };
+  return {
+    name,
+    diagram,
+    pattern: parsePattern(diagram),
+    damage,
+    staminaCost,
+    usesPerTurn,
+  };
 }
 
 const SLASH = `
