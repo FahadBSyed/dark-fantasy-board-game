@@ -987,9 +987,11 @@ function resolveOne(
       const hit = targets.some((t) => sameCoord(t, state.player.pos));
 
       if (hit) {
+        // Blocked when the attack's squares overlap the shield's guarded arc.
+        const guard = guardedSquares();
         const blocked =
           state.blocking &&
-          guardedSquares().some((g) => sameCoord(g, p.enemy.pos));
+          targets.some((t) => guard.some((g) => sameCoord(g, t)));
         applyEnemyHit(p.card, p.enemy, blocked);
         const el = cellEls.get(key(state.player.pos));
         el?.classList.add("flash-hit");
