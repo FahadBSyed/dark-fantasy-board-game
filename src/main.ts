@@ -1187,10 +1187,26 @@ function beginEnemyAttack(): void {
     return;
   }
 
-  const selections: Selection[] = attackers.map((e) => {
+  // Each enemy may only pick cards that can reach from its distance; the d10
+  // counts through just those valid cards (wrapping past the end).
+  const selections: Selection[] = [];
+  for (const e of attackers) {
+    const dist = chebyshev(e.pos, state.player.pos);
+    const valid = cards.reduce<number[]>((acc, c, i) => {
+      if (c.range >= dist) acc.push(i);
+      return acc;
+    }, []);
+    if (valid.length === 0) continue; // nothing in range — can't attack
     const roll = 1 + Math.floor(Math.random() * 10);
-    return { enemyId: e.id, roll, cardIndex: (roll - 1) % cards.length, placed: false };
-  });
+    const cardIndex = valid[(roll - 1) % valid.length];
+    selections.push({ enemyId: e.id, roll, cardIndex, placed: false });
+  }
+
+  if (selections.length === 0) {
+    if (state.enemies.length) log("The hollows close in, still out of reach.");
+    startPlayerTurn();
+    return;
+  }
 
   rollDice(
     selections.map((s) => s.roll),
