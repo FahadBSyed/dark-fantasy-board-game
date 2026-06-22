@@ -312,6 +312,18 @@ button:hover {
   cursor: not-allowed;
 }
 
+.attack-card.staged {
+  border-color: var(--ember-bright);
+  box-shadow: 0 0 16px rgba(240, 162, 75, 0.5);
+  background: #2a2018;
+}
+
+.attack-card.staged .attack-name::after {
+  content: " ⚔ staged";
+  color: var(--ember-bright);
+  font-size: 0.72rem;
+}
+
 .attack-name {
   margin-top: 8px;
   color: var(--text);

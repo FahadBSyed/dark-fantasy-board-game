@@ -84,7 +84,7 @@ interface State {
   attacksUsed: number; // attacks taken so far this player turn
   selected: boolean;
   busy: boolean; // true during attack animations; locks input
-  preview: Coord[] | null; // squares to highlight while hovering an attack
+  stagedAttack: Attack | null; // attack committed this turn, resolves on End turn
   log: string[];
 }
 
@@ -102,7 +102,7 @@ const state: State = {
   attacksUsed: 0,
   selected: false,
   busy: false,
-  preview: null,
+  stagedAttack: null,
   log: ["The Ashen One stands ready. A hollow lurks across the hall."],
 };
 
@@ -141,7 +141,10 @@ function reachable(): Set<string> {
 
 function render(): void {
   const reach = reachable();
-  const preview = new Set((state.preview ?? []).map(key));
+  const previewSquares = state.stagedAttack
+    ? targetSquares(state.stagedAttack).filter((c) => inBounds(c, WIDTH, HEIGHT))
+    : [];
+  const preview = new Set(previewSquares.map(key));
 
   boardEl.style.gridTemplateColumns = `repeat(${WIDTH}, 46px)`;
   boardEl.replaceChildren();
@@ -224,9 +227,11 @@ function renderWeapon(): void {
     const affordable = state.player.stamina >= atk.staminaCost;
     const hasUses = state.attacksUsed < atk.usesPerTurn;
     const usable = state.turn === "player" && !state.busy && affordable && hasUses;
+    const staged = state.stagedAttack === atk;
 
     const card = document.createElement("div");
-    card.className = "attack-card" + (usable ? "" : " disabled");
+    card.className =
+      "attack-card" + (usable ? "" : " disabled") + (staged ? " staged" : "");
 
     card.appendChild(makeDiagram(atk.diagram));
 
@@ -241,16 +246,9 @@ function renderWeapon(): void {
     stats.textContent = `${atk.damage} dmg · ${atk.staminaCost} stam${repeat}`;
     card.appendChild(stats);
 
-    if (usable) {
-      card.addEventListener("mouseenter", () => {
-        state.preview = targetSquares(atk).filter((c) => inBounds(c, WIDTH, HEIGHT));
-        render();
-      });
-      card.addEventListener("mouseleave", () => {
-        state.preview = null;
-        render();
-      });
-      card.addEventListener("click", () => performAttack(atk));
+    // Clicking stages (or un-stages) the attack; it resolves on End turn.
+    if (usable || staged) {
+      card.addEventListener("click", () => toggleStage(atk));
     }
 
     row.appendChild(card);
@@ -306,24 +304,22 @@ function rotate(left: boolean): void {
   render();
 }
 
-// Spend stamina, flash the targeted squares, then (if the enemy is caught)
-// flash the enemy and apply damage.
-function performAttack(atk: Attack): void {
+// Stage (or un-stage) an attack for this turn. It resolves when the player
+// ends their turn, using their position and facing at that moment.
+function toggleStage(atk: Attack): void {
   if (state.turn !== "player" || state.busy) return;
-  if (state.attacksUsed >= atk.usesPerTurn) {
-    log("No attacks left this turn.");
-    return;
-  }
-  if (state.player.stamina < atk.staminaCost) {
-    log("Not enough stamina to attack.");
-    return;
-  }
+  state.stagedAttack = state.stagedAttack === atk ? null : atk;
+  render();
+}
 
+// Resolve a staged attack: spend stamina, flash the targeted squares, then (if
+// the enemy is caught) flash the enemy and apply damage. Calls onDone once the
+// animation finishes so the turn can continue.
+function performAttack(atk: Attack, onDone: () => void): void {
   const targets = targetSquares(atk).filter((c) => inBounds(c, WIDTH, HEIGHT));
   state.player.stamina -= atk.staminaCost;
   state.attacksUsed += 1;
   state.busy = true;
-  state.preview = null;
   state.selected = false;
   log(`You strike — ${atk.name}. (−${atk.staminaCost} stamina)`);
   render();
@@ -350,11 +346,13 @@ function performAttack(atk: Attack): void {
         }
         state.busy = false;
         render();
+        onDone();
       }, FLASH_MS);
     } else {
       log("The blade meets only air.");
       state.busy = false;
       render();
+      onDone();
     }
   }, FLASH_MS);
 }
@@ -374,6 +372,24 @@ function startPlayerTurn(): void {
 function endTurn(): void {
   if (state.turn !== "player" || state.busy) return;
   state.selected = false;
+
+  const atk = state.stagedAttack;
+  state.stagedAttack = null;
+  const canAttack =
+    atk != null &&
+    state.attacksUsed < atk.usesPerTurn &&
+    state.player.stamina >= atk.staminaCost;
+
+  if (atk && canAttack) {
+    performAttack(atk, beginEnemyPhase);
+  } else {
+    beginEnemyPhase();
+  }
+}
+
+// Hand control to the enemy (or, with no enemy left, straight to the next
+// player turn).
+function beginEnemyPhase(): void {
   if (!state.enemy) {
     startPlayerTurn();
     return;
