@@ -1,14 +1,17 @@
-// Pass 1: a 10x10 grid with a single player token.
-// - Click the token to select it.
-// - Click a highlighted square to move (up to 5 squares per turn).
-// - Rotate the token with the buttons or Q / E.
-// - End the turn to restore the full move allowance.
+// Pass 2: a 10x10 grid with a player token and one enemy, taking alternating
+// turns.
+// - Player turn: click the token to select, click a highlighted square to move
+//   (up to 5 squares), rotate with the buttons or Q / E, then End turn.
+// - Enemy turn: the enemy walks up to 3 squares in a straight line toward the
+//   player, then control returns to the player.
 
 import {
   chebyshev,
   Dir,
   DIR_NAME,
+  dirFromDelta,
   inBounds,
+  sameCoord,
   turnLeft,
   turnRight,
   type Coord,
@@ -16,12 +19,14 @@ import {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-// Player token: a circular body with a triangular pointer showing facing.
-// Authored pointing North (up); rotated by facing * 45° (8 compass steps).
-function makeTokenSvg(facing: Dir): SVGSVGElement {
+type TokenKind = "player" | "enemy";
+
+// A circular body with a triangular pointer showing facing. Authored pointing
+// North (up); rotated by facing * 45° (8 compass steps).
+function makeTokenSvg(facing: Dir, kind: TokenKind): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 40 40");
-  svg.classList.add("token-svg");
+  svg.classList.add("token-svg", kind);
 
   const g = document.createElementNS(SVG_NS, "g");
   g.setAttribute("transform", `rotate(${facing * 45} 20 20)`);
@@ -45,21 +50,32 @@ function makeTokenSvg(facing: Dir): SVGSVGElement {
 const WIDTH = 10;
 const HEIGHT = 10;
 const MOVES_PER_TURN = 5;
+const ENEMY_MOVES_PER_TURN = 3;
+const ENEMY_STEP_MS = 280;
 
-interface State {
+interface Token {
   pos: Coord;
   facing: Dir;
+}
+
+type Turn = "player" | "enemy";
+
+interface State {
+  player: Token;
+  enemy: Token;
+  turn: Turn;
   movesLeft: number;
   selected: boolean;
   log: string[];
 }
 
 const state: State = {
-  pos: { x: 4, y: 5 },
-  facing: Dir.N,
+  player: { pos: { x: 4, y: 7 }, facing: Dir.N },
+  enemy: { pos: { x: 4, y: 1 }, facing: Dir.S },
+  turn: "player",
   movesLeft: MOVES_PER_TURN,
   selected: false,
-  log: ["The Ashen One stands ready."],
+  log: ["The Ashen One stands ready. A hollow lurks across the hall."],
 };
 
 const boardEl = document.getElementById("board")!;
@@ -71,16 +87,17 @@ function log(msg: string): void {
   state.log = state.log.slice(0, 30);
 }
 
-// Squares the selected token can reach with its remaining moves (king-move
-// distance), excluding its own cell and anything off the board.
+// Squares the selected player can reach with its remaining moves (king-move
+// distance), excluding its own cell, the enemy's cell, and off-board cells.
 function reachable(): Set<string> {
   const out = new Set<string>();
-  if (!state.selected) return out;
+  if (state.turn !== "player" || !state.selected) return out;
+  const { pos } = state.player;
   for (let y = 0; y < HEIGHT; y++) {
     for (let x = 0; x < WIDTH; x++) {
       const c = { x, y };
-      if (x === state.pos.x && y === state.pos.y) continue;
-      if (chebyshev(state.pos, c) <= state.movesLeft) out.add(`${x},${y}`);
+      if (sameCoord(c, pos) || sameCoord(c, state.enemy.pos)) continue;
+      if (chebyshev(pos, c) <= state.movesLeft) out.add(`${x},${y}`);
     }
   }
   return out;
@@ -97,17 +114,21 @@ function render(): void {
       const cell = document.createElement("div");
       cell.className = "cell" + ((x + y) % 2 ? " dark" : "");
 
-      const isPlayer = x === state.pos.x && y === state.pos.y;
+      const isPlayer = sameCoord({ x, y }, state.player.pos);
+      const isEnemy = sameCoord({ x, y }, state.enemy.pos);
       const isReach = reach.has(`${x},${y}`);
 
       if (isPlayer) {
         cell.classList.add("player");
         if (state.selected) cell.classList.add("selected");
-        cell.appendChild(makeTokenSvg(state.facing));
+        cell.appendChild(makeTokenSvg(state.player.facing, "player"));
         cell.addEventListener("click", () => {
+          if (state.turn !== "player") return;
           state.selected = !state.selected;
           render();
         });
+      } else if (isEnemy) {
+        cell.appendChild(makeTokenSvg(state.enemy.facing, "enemy"));
       } else if (isReach) {
         cell.classList.add("reach");
         cell.addEventListener("click", () => moveTo({ x, y }));
@@ -121,10 +142,12 @@ function render(): void {
 }
 
 function renderHud(): void {
+  const turnLabel = state.turn === "player" ? "Your turn" : "Enemy turn";
   vitalsEl.innerHTML = `
+    <div><span class="key">Turn</span> · <span class="val">${turnLabel}</span></div>
     <div><span class="key">Moves left</span> · <span class="val">${state.movesLeft}</span> / ${MOVES_PER_TURN}</div>
-    <div><span class="key">Facing</span> · <span class="val">${DIR_NAME[state.facing]}</span></div>
-    <div><span class="key">Position</span> · <span class="val">${state.pos.x}, ${state.pos.y}</span></div>
+    <div><span class="key">Facing</span> · <span class="val">${DIR_NAME[state.player.facing]}</span></div>
+    <div><span class="key">Position</span> · <span class="val">${state.player.pos.x}, ${state.player.pos.y}</span></div>
   `;
   logEl.replaceChildren(
     ...state.log.map((line) => {
@@ -136,11 +159,12 @@ function renderHud(): void {
 }
 
 function moveTo(dest: Coord): void {
-  if (!state.selected) return;
+  if (state.turn !== "player" || !state.selected) return;
   if (!inBounds(dest, WIDTH, HEIGHT)) return;
-  const cost = chebyshev(state.pos, dest);
+  if (sameCoord(dest, state.enemy.pos)) return;
+  const cost = chebyshev(state.player.pos, dest);
   if (cost === 0 || cost > state.movesLeft) return;
-  state.pos = dest;
+  state.player.pos = dest;
   state.movesLeft -= cost;
   log(`Moved to ${dest.x}, ${dest.y} (−${cost}).`);
   if (state.movesLeft === 0) {
@@ -151,14 +175,52 @@ function moveTo(dest: Coord): void {
 }
 
 function rotate(left: boolean): void {
-  state.facing = left ? turnLeft(state.facing) : turnRight(state.facing);
+  if (state.turn !== "player") return;
+  state.player.facing = left
+    ? turnLeft(state.player.facing)
+    : turnRight(state.player.facing);
   render();
 }
 
 function endTurn(): void {
-  state.movesLeft = MOVES_PER_TURN;
+  if (state.turn !== "player") return;
   state.selected = false;
-  log("— New turn —");
+  state.turn = "enemy";
+  log("— Enemy turn —");
+  render();
+  setTimeout(() => enemyStep(0), ENEMY_STEP_MS);
+}
+
+// One step of the enemy's advance: face the player and move one square along
+// the straight line toward them, stopping when adjacent, blocked, or out of
+// moves.
+function enemyStep(stepsTaken: number): void {
+  const { enemy, player } = state;
+  const dx = player.pos.x - enemy.pos.x;
+  const dy = player.pos.y - enemy.pos.y;
+
+  // Always look at the player, even if we can't move.
+  const facing = dirFromDelta(dx, dy);
+  if (facing !== null) enemy.facing = facing;
+
+  const adjacent = chebyshev(enemy.pos, player.pos) <= 1;
+  if (stepsTaken >= ENEMY_MOVES_PER_TURN || adjacent || facing === null) {
+    render();
+    endEnemyTurn();
+    return;
+  }
+
+  const next = { x: enemy.pos.x + Math.sign(dx), y: enemy.pos.y + Math.sign(dy) };
+  enemy.pos = next;
+  log(`The hollow advances to ${next.x}, ${next.y}.`);
+  render();
+  setTimeout(() => enemyStep(stepsTaken + 1), ENEMY_STEP_MS);
+}
+
+function endEnemyTurn(): void {
+  state.turn = "player";
+  state.movesLeft = MOVES_PER_TURN;
+  log("— Your turn —");
   render();
 }
 

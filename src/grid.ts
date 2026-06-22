@@ -102,6 +102,18 @@ export function squaresFor(
   });
 }
 
+// The compass direction matching a step delta (each component -1, 0, or 1).
+// Returns null only when the delta is (0, 0).
+export function dirFromDelta(dx: number, dy: number): Dir | null {
+  const sx = Math.sign(dx);
+  const sy = Math.sign(dy);
+  if (sx === 0 && sy === 0) return null;
+  for (let d = 0; d < DIR_COUNT; d++) {
+    if (STEP[d].x === sx && STEP[d].y === sy) return d as Dir;
+  }
+  return null;
+}
+
 export function inBounds(c: Coord, width: number, height: number): boolean {
   return c.x >= 0 && c.y >= 0 && c.x < width && c.y < height;
 }

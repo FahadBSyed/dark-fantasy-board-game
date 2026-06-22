@@ -124,6 +124,20 @@ body {
   stroke-width: 1;
 }
 
+.token-svg.enemy {
+  filter: drop-shadow(0 0 8px rgba(90, 150, 90, 0.7));
+}
+
+.token-svg.enemy .token-body {
+  fill: #5c7a4a;
+  stroke: #141d10;
+}
+
+.token-svg.enemy .token-pointer {
+  fill: #cdd6bf;
+  stroke: #141d10;
+}
+
 .cell.selected .token-svg {
   filter: drop-shadow(0 0 12px rgba(240, 162, 75, 0.95));
 }
