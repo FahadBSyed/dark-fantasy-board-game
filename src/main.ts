@@ -63,6 +63,7 @@ const STAMINA_REGEN = 2;
 const MAX_HP = 5;
 const ENEMY_MOVES_PER_TURN = 3;
 const ENEMY_STEP_MS = 280;
+const CARD_SLIDE_MS = 360; // let the selected card finish sliding before the clock
 const FLASH_MS = 260;
 const COUNTDOWN_SECONDS = 3;
 const ENGAGE_RANGE = 2; // enemy only attacks within this distance
@@ -712,8 +713,8 @@ function beginEnemyAttack(): void {
   state.selected = true; // pre-select so the player can reposition fast
   state.phase = "countdown";
   log(`d10 → ${roll}: the hollow readies its ${idx + 1}${ordinal(idx + 1)} card.`);
-  render();
-  startCountdown();
+  render(); // card slides forward; start the clock once it settles
+  setTimeout(startCountdown, CARD_SLIDE_MS);
 }
 
 function ordinal(n: number): string {
