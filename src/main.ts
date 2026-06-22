@@ -19,7 +19,13 @@ import {
   turnRight,
   type Coord,
 } from "./grid";
-import { STRAIGHT_SWORD, type Attack, type Weapon } from "./weapons";
+import {
+  STRAIGHT_SWORD,
+  KITE_SHIELD,
+  type Attack,
+  type Shield,
+  type Weapon,
+} from "./weapons";
 import { HOLLOW_AXEMAN, type EnemyCard, type EnemyTemplate } from "./enemies";
 import { beep, blare, resumeAudio } from "./audio";
 
@@ -75,6 +81,7 @@ interface PlayerToken {
   stamina: number;
   maxStamina: number;
   weapon: Weapon;
+  shield: Shield;
 }
 
 interface EnemyToken {
@@ -104,6 +111,8 @@ interface State {
   selected: boolean;
   busy: boolean;
   stagedAttack: Attack | null;
+  stagedBlock: boolean; // raise guard this turn (instead of attacking)
+  blocking: boolean; // guard is up during the enemy resolution
   selections: Selection[]; // enemy card picks this turn
   cardFlipped: boolean; // all selected cards flip together
   countdownNum: number;
@@ -137,6 +146,7 @@ const state: State = {
     stamina: MAX_STAMINA,
     maxStamina: MAX_STAMINA,
     weapon: STRAIGHT_SWORD,
+    shield: KITE_SHIELD,
   },
   enemies: spawnEnemies(),
   phase: "player",
@@ -145,6 +155,8 @@ const state: State = {
   selected: false,
   busy: false,
   stagedAttack: null,
+  stagedBlock: false,
+  blocking: false,
   selections: [],
   cardFlipped: false,
   countdownNum: 0,
@@ -213,6 +225,14 @@ function reachable(): Set<string> {
   return out;
 }
 
+function guardedSquares(): Coord[] {
+  return squaresForOffsets(
+    state.player.shield.pattern,
+    state.player.pos,
+    state.player.facing
+  ).filter((c) => inBounds(c, WIDTH, HEIGHT));
+}
+
 function render(): void {
   const reach = reachable();
   const preview = new Set(
@@ -221,6 +241,11 @@ function render(): void {
       : []
     ).map(key)
   );
+  // Guard arc, shown while staging a block or while the guard is up.
+  const guardUp =
+    (state.phase === "player" && state.stagedBlock) ||
+    (state.phase === "countdown" && state.blocking);
+  const guard = new Set((guardUp ? guardedSquares() : []).map(key));
 
   boardEl.style.gridTemplateColumns = `repeat(${WIDTH}, 46px)`;
   boardEl.replaceChildren();
@@ -237,6 +262,7 @@ function render(): void {
       const enemy = enemyAt(here);
 
       if (preview.has(key(here))) cell.classList.add("target-preview");
+      if (guard.has(key(here))) cell.classList.add("guard-preview");
 
       if (isPlayer) {
         cell.classList.add("player");
@@ -259,6 +285,7 @@ function render(): void {
 
   renderEnemyDeck();
   renderWeapon();
+  renderShield();
   renderHud();
 }
 
@@ -473,6 +500,84 @@ function renderWeapon(): void {
   weaponEl.appendChild(card);
 }
 
+function renderShield(): void {
+  const shield = state.player.shield;
+
+  const card = document.createElement("div");
+  card.className = "weapon-card shield-card";
+
+  const corner = document.createElement("div");
+  corner.className = "weapon-corner";
+  corner.textContent = "🛡";
+  card.appendChild(corner);
+
+  const title = document.createElement("div");
+  title.className = "weapon-card-title";
+  title.textContent = shield.name;
+  card.appendChild(title);
+
+  card.appendChild(makeShieldArt());
+
+  const usable = state.phase === "player" && !state.busy;
+  const staged = state.stagedBlock;
+
+  const opt = document.createElement("div");
+  opt.className =
+    "attack-option" + (usable ? "" : " disabled") + (staged ? " staged" : "");
+
+  const head = document.createElement("div");
+  head.className = "attack-text";
+  const name = document.createElement("div");
+  name.className = "attack-name";
+  name.textContent = "Raise Guard";
+  head.appendChild(name);
+  const stats = document.createElement("div");
+  stats.className = "attack-stats";
+  stats.textContent = "damage → stamina";
+  head.appendChild(stats);
+  opt.appendChild(head);
+
+  const pair = document.createElement("div");
+  pair.className = "diagram-pair";
+  pair.appendChild(makeDiagram(shield.diagram, Dir.N, false));
+  if (shield.diagonalDiagram) {
+    const arrow = document.createElement("span");
+    arrow.className = "diagram-arrow";
+    arrow.textContent = "↻";
+    pair.appendChild(arrow);
+    pair.appendChild(makeDiagram(shield.diagonalDiagram, Dir.NE, false));
+  }
+  opt.appendChild(pair);
+
+  if (usable || staged) opt.addEventListener("click", toggleBlock);
+
+  const attacks = document.createElement("div");
+  attacks.className = "weapon-card-attacks";
+  attacks.appendChild(opt);
+  card.appendChild(attacks);
+
+  weaponEl.appendChild(card);
+}
+
+function makeShieldArt(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 64 120");
+  svg.classList.add("weapon-art");
+
+  const body = document.createElementNS(SVG_NS, "path");
+  body.setAttribute("d", "M32 12 L54 22 V60 Q54 92 32 106 Q10 92 10 60 V22 Z");
+  body.setAttribute("class", "shield-body");
+
+  const boss = document.createElementNS(SVG_NS, "circle");
+  boss.setAttribute("cx", "32");
+  boss.setAttribute("cy", "58");
+  boss.setAttribute("r", "8");
+  boss.setAttribute("class", "shield-boss");
+
+  svg.append(body, boss);
+  return svg;
+}
+
 function makeSwordArt(): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 64 120");
@@ -596,6 +701,14 @@ function rotate(left: boolean): void {
 function toggleStage(atk: Attack): void {
   if (state.phase !== "player" || state.busy) return;
   state.stagedAttack = state.stagedAttack === atk ? null : atk;
+  if (state.stagedAttack) state.stagedBlock = false; // one action per turn
+  render();
+}
+
+function toggleBlock(): void {
+  if (state.phase !== "player" || state.busy) return;
+  state.stagedBlock = !state.stagedBlock;
+  if (state.stagedBlock) state.stagedAttack = null;
   render();
 }
 
@@ -655,6 +768,8 @@ function startPlayerTurn(): void {
   state.phase = "player";
   state.movesLeft = MOVES_PER_TURN;
   state.attacksUsed = 0;
+  state.stagedBlock = false;
+  state.blocking = false;
   state.selections = [];
   state.cardFlipped = false;
   state.countdownNum = 0;
@@ -672,6 +787,10 @@ function endTurn(): void {
   if (state.phase !== "player" || state.busy) return;
   resumeAudio();
   state.selected = false;
+
+  // Commit the guard stance (if staged) for the coming enemy resolution.
+  state.blocking = state.stagedBlock;
+  state.stagedBlock = false;
 
   const atk = state.stagedAttack;
   state.stagedAttack = null;
@@ -820,7 +939,11 @@ function resolveEnemyAttacks(): void {
     let anyHit = false;
     for (const p of plan) {
       if (p.targets.some((t) => sameCoord(t, state.player.pos))) {
-        applyEnemyHit(p.card, p.enemy);
+        // Blocked if the guard is up and the attacker stands in the guard arc.
+        const blocked =
+          state.blocking &&
+          guardedSquares().some((g) => sameCoord(g, p.enemy.pos));
+        applyEnemyHit(p.card, p.enemy, blocked);
         anyHit = true;
       } else {
         log(`Hollow #${p.enemy.id}'s ${p.card.name} misses.`);
@@ -840,10 +963,22 @@ function resolveEnemyAttacks(): void {
   }, FLASH_MS);
 }
 
-function applyEnemyHit(card: EnemyCard, enemy: EnemyToken): void {
+function applyEnemyHit(card: EnemyCard, enemy: EnemyToken, blocked: boolean): void {
   const player = state.player;
-  player.hp -= card.damage;
-  let msg = `Hollow #${enemy.id}'s ${card.name} lands — ${card.damage} damage.`;
+  let msg: string;
+
+  if (blocked) {
+    // Damage hits stamina first; any overflow spills to health.
+    const absorbed = Math.min(player.stamina, card.damage);
+    player.stamina -= absorbed;
+    const overflow = card.damage - absorbed;
+    if (overflow > 0) player.hp -= overflow;
+    msg = `Hollow #${enemy.id}'s ${card.name} blocked — stamina absorbs ${absorbed}`;
+    msg += overflow > 0 ? `, ${overflow} health lost.` : ".";
+  } else {
+    player.hp -= card.damage;
+    msg = `Hollow #${enemy.id}'s ${card.name} lands — ${card.damage} damage.`;
+  }
 
   if (card.staminaDamage) {
     player.stamina = Math.max(0, player.stamina - card.staminaDamage);

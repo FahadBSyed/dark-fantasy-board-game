@@ -794,3 +794,32 @@ body.locked-scroll {
   justify-content: center;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.6);
 }
+
+/* --- Block / guard --- */
+
+/* Guarded squares while raising or holding the shield. */
+.cell.guard-preview {
+  box-shadow: inset 0 0 0 2px rgba(96, 170, 220, 0.85);
+}
+
+.shield-card {
+  width: 200px;
+}
+
+.shield-body {
+  fill: #7a8a9c;
+  stroke: #3a4654;
+  stroke-width: 2;
+}
+
+.shield-boss {
+  fill: #caa45a;
+  stroke: #6a5736;
+  stroke-width: 1.5;
+}
+
+#weapon {
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}

@@ -23,6 +23,13 @@ export interface Weapon {
   attacks: Attack[];
 }
 
+export interface Shield {
+  name: string;
+  diagram: string; // guarded squares, facing North
+  diagonalDiagram?: string; // illustration facing NE
+  pattern: Offset[];
+}
+
 function attack(
   name: string,
   diagram: string,
@@ -56,4 +63,22 @@ const SLASH_DIAGONAL = `
 export const STRAIGHT_SWORD: Weapon = {
   name: "Straight Sword",
   attacks: [attack("Slash", SLASH, 2, 2, 1, SLASH_DIAGONAL)],
+};
+
+// Guard arc: the three squares directly ahead. An attacker standing in this
+// arc is blocked — its damage hits stamina first, overflow to health.
+const GUARD = `
+XXX
+-^-`;
+
+const GUARD_DIAGONAL = `
+-X---
+--X--
+-^-X-`;
+
+export const KITE_SHIELD: Shield = {
+  name: "Kite Shield",
+  diagram: GUARD,
+  diagonalDiagram: GUARD_DIAGONAL,
+  pattern: parsePattern(GUARD),
 };
