@@ -14,22 +14,18 @@
       </header>
 
       <main id="stage">
-        <div id="board" aria-label="combat grid"></div>
-
-        <aside id="hud">
-          <div id="vitals"></div>
-          <p id="hint">
-            Click the token to select it, then click a highlighted square to
-            move (up to 5 squares per turn). Use the buttons (or Q / E) to
-            rotate. Select an attack from your weapon card to stage it (its
-            target squares highlight), then End turn to strike.
-          </p>
-          <div id="log" aria-label="log"></div>
+        <aside id="log-panel">
+          <div id="log" aria-label="battle log"></div>
         </aside>
-      </main>
 
-      <section id="weapon" aria-label="weapon card"></section>
+        <div class="board-col">
+          <div id="board" aria-label="combat grid"></div>
+          <section id="weapon" aria-label="weapon card"></section>
+        </div>
+      </main>
     </div>
+
+    <div id="turn-flash" aria-live="polite"></div>
 
     <div id="control-dock" role="toolbar" aria-label="combat controls">
       <div id="stamina" class="stamina-pip" title="Stamina remaining" aria-label="Stamina">5</div>

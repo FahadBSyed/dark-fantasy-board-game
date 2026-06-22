@@ -106,10 +106,11 @@ const state: State = {
 };
 
 const boardEl = document.getElementById("board")!;
-const vitalsEl = document.getElementById("vitals")!;
 const logEl = document.getElementById("log")!;
 const weaponEl = document.getElementById("weapon")!;
 const staminaEl = document.getElementById("stamina")!;
+const dockEl = document.getElementById("control-dock")!;
+const turnFlashEl = document.getElementById("turn-flash")!;
 
 // Coordinate ("x,y") -> cell element, rebuilt on every render so the attack
 // flash sequence can target specific squares without a full re-render.
@@ -192,11 +193,6 @@ function render(): void {
 }
 
 function renderHud(): void {
-  const yours = state.turn === "player";
-  vitalsEl.innerHTML = `<div class="turn-state ${yours ? "you" : "enemy"}">${
-    yours ? "Your turn" : "Enemy turn"
-  }</div>`;
-
   staminaEl.textContent = String(state.player.stamina);
   staminaEl.classList.toggle("empty", state.player.stamina <= 0);
 
@@ -207,6 +203,23 @@ function renderHud(): void {
       return d;
     })
   );
+
+  updateInteractivity();
+}
+
+// During anything but the player's own turn, lock the dock and page scroll.
+function updateInteractivity(): void {
+  const playerActive = state.turn === "player" && !state.busy;
+  dockEl.classList.toggle("locked", !playerActive);
+  document.body.classList.toggle("locked-scroll", !playerActive);
+}
+
+// Flash a turn announcement across the screen, then let it fade out.
+function flashTurn(text: string): void {
+  turnFlashEl.textContent = text;
+  turnFlashEl.classList.remove("show");
+  void turnFlashEl.offsetWidth; // restart the CSS animation
+  turnFlashEl.classList.add("show");
 }
 
 // Render the weapon as a skeuomorphic card below the board, with its attacks
@@ -243,23 +256,34 @@ function renderWeapon(): void {
     opt.className =
       "attack-option" + (usable ? "" : " disabled") + (staged ? " staged" : "");
 
-    opt.appendChild(makeDiagram(atk.diagram));
-
-    const text = document.createElement("div");
-    text.className = "attack-text";
+    const head = document.createElement("div");
+    head.className = "attack-text";
 
     const name = document.createElement("div");
     name.className = "attack-name";
     name.textContent = atk.name;
-    text.appendChild(name);
+    head.appendChild(name);
 
     const stats = document.createElement("div");
     stats.className = "attack-stats";
     const repeat = atk.usesPerTurn > 1 ? ` · ×${atk.usesPerTurn}/turn` : "";
     stats.textContent = `${atk.damage} dmg · ${atk.staminaCost} stam${repeat}`;
-    text.appendChild(stats);
+    head.appendChild(stats);
 
-    opt.appendChild(text);
+    opt.appendChild(head);
+
+    // Show the cardinal pattern and, if present, the diagonal illustration.
+    const pair = document.createElement("div");
+    pair.className = "diagram-pair";
+    pair.appendChild(makeDiagram(atk.diagram, Dir.N));
+    if (atk.diagonalDiagram) {
+      const arrow = document.createElement("span");
+      arrow.className = "diagram-arrow";
+      arrow.textContent = "↻";
+      pair.appendChild(arrow);
+      pair.appendChild(makeDiagram(atk.diagonalDiagram, Dir.NE));
+    }
+    opt.appendChild(pair);
 
     // Clicking stages (or un-stages) the attack; it resolves on End turn.
     if (usable || staged) {
@@ -308,8 +332,9 @@ function makeSwordArt(): SVGSVGElement {
   return svg;
 }
 
-// A small visual of the attack's authored diagram.
-function makeDiagram(diagram: string): HTMLElement {
+// A small visual of an attack diagram. The attacker ('^') is drawn as a
+// triangle pointing in `facing`, so the diagonal illustration shows NE.
+function makeDiagram(diagram: string, facing: Dir): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "diagram";
   const rows = diagram.replace(/^\n+|\n+$/g, "").split("\n");
@@ -319,12 +344,24 @@ function makeDiagram(diagram: string): HTMLElement {
     for (let x = 0; x < w; x++) {
       const ch = (r[x] ?? "").toLowerCase();
       const dot = document.createElement("span");
-      dot.className =
-        "dot" + (ch === "x" ? " hit" : ch === "^" ? " self" : "");
+      dot.className = "dot" + (ch === "x" ? " hit" : ch === "^" ? " self" : "");
+      if (ch === "^") dot.appendChild(makeSelfMarker(facing));
       wrap.appendChild(dot);
     }
   }
   return wrap;
+}
+
+// Small green triangle marking the attacker, pointing in the given facing.
+function makeSelfMarker(facing: Dir): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 12 12");
+  svg.classList.add("self-marker");
+  const tri = document.createElementNS(SVG_NS, "polygon");
+  tri.setAttribute("points", "6,1 10.5,11 1.5,11");
+  tri.setAttribute("transform", `rotate(${facing * 45} 6 6)`);
+  svg.appendChild(tri);
+  return svg;
 }
 
 function targetSquares(atk: Attack): Coord[] {
@@ -417,6 +454,7 @@ function startPlayerTurn(): void {
     state.player.stamina + STAMINA_REGEN
   );
   log("— Your turn —");
+  flashTurn("Your turn");
   render();
 }
 
@@ -447,6 +485,7 @@ function beginEnemyPhase(): void {
   }
   state.turn = "enemy";
   log("— Enemy turn —");
+  flashTurn("Enemy turn");
   render();
   setTimeout(() => enemyStep(0), ENEMY_STEP_MS);
 }
@@ -493,3 +532,4 @@ window.addEventListener("keydown", (e) => {
 });
 
 render();
+flashTurn("Your turn");

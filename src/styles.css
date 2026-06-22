@@ -62,6 +62,13 @@ body {
   margin-top: 24px;
   flex-wrap: wrap;
   justify-content: center;
+  align-items: flex-start;
+}
+
+.board-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 #board {
@@ -271,22 +278,32 @@ body {
   color: #15151c;
 }
 
-#hint {
-  margin: 16px 0 0;
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  font-style: italic;
-  line-height: 1.5;
+/* When it's not the player's turn, the dock is inert and dimmed. */
+#control-dock.locked {
+  opacity: 0.45;
+  pointer-events: none;
+  filter: grayscale(0.4);
+}
+
+body.locked-scroll {
+  overflow: hidden;
+}
+
+/* --- Battle log (left of the grid) --- */
+
+#log-panel {
+  width: 220px;
+  background: var(--panel);
+  border: 1px solid var(--grid-line);
+  border-radius: 4px;
+  padding: 12px 14px;
+  max-height: 480px;
+  overflow-y: auto;
 }
 
 #log {
-  margin-top: 14px;
-  border-top: 1px solid var(--grid-line);
-  padding-top: 10px;
   font-size: 0.78rem;
   color: var(--text-dim);
-  max-height: 140px;
-  overflow-y: auto;
 }
 
 #log div {
@@ -344,7 +361,7 @@ body {
 /* --- Weapon card (skeuomorphic) --- */
 
 #weapon {
-  margin-top: 28px;
+  margin-top: 12px;
   display: flex;
   justify-content: center;
 }
@@ -412,8 +429,8 @@ body {
 
 .attack-option {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 8px;
   padding: 8px 10px;
   background: rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(106, 87, 54, 0.45);
@@ -459,6 +476,17 @@ body {
   margin-top: 2px;
 }
 
+.diagram-pair {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.diagram-arrow {
+  color: #8a7142;
+  font-size: 1rem;
+}
+
 .diagram {
   display: inline-grid;
   gap: 2px;
@@ -477,5 +505,58 @@ body {
 }
 
 .diagram .dot.self {
-  background: #5c7a4a;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.self-marker {
+  width: 11px;
+  height: 11px;
+}
+
+.self-marker polygon {
+  fill: #6f9456;
+  stroke: #2c3d22;
+  stroke-width: 0.75;
+}
+
+/* --- Turn announcement flash --- */
+
+#turn-flash {
+  position: fixed;
+  top: 38%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 3rem;
+  letter-spacing: 0.1em;
+  color: var(--ember);
+  text-shadow: 0 0 24px rgba(0, 0, 0, 0.9), 0 0 30px rgba(200, 115, 47, 0.5);
+  pointer-events: none;
+  opacity: 0;
+  z-index: 100;
+}
+
+#turn-flash.show {
+  animation: turnflash 1.5s ease forwards;
+}
+
+@keyframes turnflash {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.85);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.05);
+  }
 }

@@ -8,7 +8,8 @@ import { parsePattern, type Offset } from "./grid";
 
 export interface Attack {
   name: string;
-  diagram: string;
+  diagram: string; // authored facing North; drives the actual pattern
+  diagonalDiagram?: string; // illustration only: the same attack facing NE
   pattern: Offset[];
   damage: number;
   staminaCost: number;
@@ -27,11 +28,13 @@ function attack(
   diagram: string,
   damage: number,
   staminaCost: number,
-  usesPerTurn = 1
+  usesPerTurn = 1,
+  diagonalDiagram?: string
 ): Attack {
   return {
     name,
     diagram,
+    diagonalDiagram,
     pattern: parsePattern(diagram),
     damage,
     staminaCost,
@@ -40,10 +43,17 @@ function attack(
 }
 
 const SLASH = `
-XXXXX
---^--`;
+xxx
+-^-
+---`;
+
+// How the same Slash lands when the attacker faces north-east (illustrative).
+const SLASH_DIAGONAL = `
+-x---
+--x--
+-^-x-`;
 
 export const STRAIGHT_SWORD: Weapon = {
   name: "Straight Sword",
-  attacks: [attack("Slash", SLASH, 2, 2)],
+  attacks: [attack("Slash", SLASH, 2, 2, 1, SLASH_DIAGONAL)],
 };
