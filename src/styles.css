@@ -33,7 +33,7 @@ body {
 #app {
   max-width: 980px;
   margin: 0 auto;
-  padding: 24px 16px 48px;
+  padding: 24px 16px 110px; /* extra bottom room for the fixed control dock */
 }
 
 #banner {
@@ -213,34 +213,62 @@ body {
   color: var(--ember);
 }
 
-#controls {
+/* --- Floating control dock (stays put while scrolling) --- */
+
+#control-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(21, 21, 28, 0.85);
+  border: 1px solid var(--grid-line);
+  border-radius: 999px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  z-index: 50;
 }
 
-button {
+#control-dock button {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   background: #20202a;
   color: var(--text);
   border: 1px solid var(--grid-line);
-  padding: 8px 12px;
-  font-family: inherit;
-  font-size: 0.9rem;
-  letter-spacing: 0.04em;
+  border-radius: 50%;
   cursor: pointer;
-  border-radius: 3px;
   transition: all 0.12s ease;
 }
 
-button:hover {
+#control-dock button svg {
+  width: 20px;
+  height: 20px;
+}
+
+#control-dock button:hover {
+  border-color: var(--ember);
+  color: var(--ember);
+  background: #262630;
+}
+
+/* The center button (End turn) is the primary action — give it the ember. */
+#control-dock #end-turn {
+  width: 50px;
+  height: 50px;
   border-color: var(--ember);
   color: var(--ember);
 }
 
-#end-turn {
-  margin-top: 6px;
-  border-color: var(--ember);
-  color: var(--ember);
+#control-dock #end-turn:hover {
+  background: var(--ember);
+  color: #15151c;
 }
 
 #hint {
