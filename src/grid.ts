@@ -141,28 +141,43 @@ export function parsePattern(diagram: string): Offset[] {
   return out;
 }
 
-// Orient an offset pattern to any of the 8 facings and resolve to absolute
-// grid coords. Each cell is read in the attacker's own basis: dx is "strafe"
-// (rightward in the North-facing diagram) and -dy is "forward" (up in the
-// diagram). We rebuild that basis from the facing — forward = the facing's
-// unit step, right = the step 90° clockwise — so the pattern stays integer and
-// keeps its footprint. On cardinals this is an exact rotation; on diagonals it
-// shears the pattern out along the diagonal (a 5-wide line becomes a 5-long
-// diagonal line), which is the intended behaviour.
+// The cells of the square ring at Chebyshev radius r, listed clockwise from
+// North. The ring has 8r cells, and the cell at compass direction d sits at
+// index d*r — so rotating by one octant (45°) advances r steps along the ring.
+function ringCells(r: number): Coord[] {
+  const cells: Coord[] = [];
+  for (let x = 0; x <= r; x++) cells.push({ x, y: -r }); // N → NE corner
+  for (let y = -r + 1; y <= r; y++) cells.push({ x: r, y }); // → SE corner
+  for (let x = r - 1; x >= -r; x--) cells.push({ x, y: r }); // → SW corner
+  for (let y = r - 1; y >= -r; y--) cells.push({ x: -r, y }); // → NW corner
+  for (let x = -r + 1; x <= -1; x++) cells.push({ x, y: -r }); // → back to N
+  return cells;
+}
+
+// Rotate a single offset by `facing` octants (45° each) around the attacker,
+// staying on its Chebyshev ring. A straight run bends compactly around the
+// corner rather than shearing out into a long diagonal.
+function rotateOffset(o: Coord, facing: Dir): Coord {
+  const r = Math.max(Math.abs(o.x), Math.abs(o.y));
+  if (r === 0 || facing === Dir.N) return o;
+  const ring = ringCells(r);
+  const idx = ring.findIndex((c) => c.x === o.x && c.y === o.y);
+  if (idx < 0) return o; // shouldn't happen — every offset lies on its ring
+  return ring[(idx + facing * r) % ring.length];
+}
+
+// Orient an offset pattern to any of the 8 facings and resolve to absolute grid
+// coords. Patterns are authored facing North; each cell is rotated around its
+// ring by the facing. On cardinals this is an exact 90° rotation; on diagonals
+// the pattern bends compactly to hug the new facing.
 export function squaresForOffsets(
   pattern: OffsetPattern,
   origin: Coord,
   facing: Dir
 ): Coord[] {
-  const fwd = STEP[facing];
-  const right = STEP[rotateDir(facing, Dir.E)]; // 90° clockwise from forward
   return pattern.map(({ dx, dy }) => {
-    const s = dx; // strafe
-    const f = -dy; // forward
-    return {
-      x: origin.x + s * right.x + f * fwd.x,
-      y: origin.y + s * right.y + f * fwd.y,
-    };
+    const r = rotateOffset({ x: dx, y: dy }, facing);
+    return { x: origin.x + r.x, y: origin.y + r.y };
   });
 }
 

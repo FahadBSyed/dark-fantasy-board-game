@@ -36,9 +36,9 @@ const AXE_CUT = card({
 XXX
 -^-`,
   diagonalDiagram: `
--X---
---X--
--^-X-`,
+-XX
+-^X
+---`,
   damage: 2,
 });
 

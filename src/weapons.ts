@@ -56,9 +56,9 @@ xxx
 
 // How the same Slash lands when the attacker faces north-east (illustrative).
 const SLASH_DIAGONAL = `
--x---
---x--
--^-x-`;
+-XX
+-^X
+---`;
 
 export const STRAIGHT_SWORD: Weapon = {
   name: "Straight Sword",
@@ -72,9 +72,9 @@ XXX
 -^-`;
 
 const GUARD_DIAGONAL = `
--X---
---X--
--^-X-`;
+-XX
+-^X
+---`;
 
 export const KITE_SHIELD: Shield = {
   name: "Kite Shield",
