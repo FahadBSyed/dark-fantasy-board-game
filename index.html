@@ -24,6 +24,14 @@
           <div id="board" aria-label="combat grid"></div>
           <section id="weapon" aria-label="weapon card"></section>
         </div>
+
+        <aside id="stamina-area">
+          <div class="stamina-title">Stamina</div>
+          <div id="stamina-pile" class="stamina-pool" aria-label="stamina pile"></div>
+          <div id="stamina-prompt"></div>
+          <div class="stamina-zone-label">spend zone</div>
+          <div id="stamina-zone" class="stamina-pool zone" aria-label="spend zone"></div>
+        </aside>
       </main>
     </div>
 
@@ -32,8 +40,6 @@
     <div id="turn-flash" aria-live="polite"></div>
 
     <div id="control-dock" role="toolbar" aria-label="combat controls">
-      <div id="stamina" class="stamina-pip" title="Stamina remaining" aria-label="Stamina">5</div>
-      <span class="dock-divider" aria-hidden="true"></span>
       <button id="turn-left" type="button" title="Turn left (Q)" aria-label="Turn left">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="1 4 1 10 7 10"></polyline>

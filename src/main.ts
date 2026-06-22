@@ -133,6 +133,13 @@ interface State {
   countdownNum: number;
   dodgeArmed: boolean;
   repositioned: boolean;
+  // Stamina is a physical token economy: pile (player.stamina) + spend zone
+  // (maxStamina - stamina) is conserved. A gate forces the player to drag
+  // tokens before continuing.
+  staminaGate: { dir: "spend" | "replenish"; remaining: number } | null;
+  // Stamina spent during the enemy turn (dodge + block absorption + kick loss),
+  // reserved against the pile and paid by dragging after the turn resolves.
+  staminaOwed: number;
   log: string[];
 }
 
@@ -179,13 +186,17 @@ const state: State = {
   countdownNum: 0,
   dodgeArmed: false,
   repositioned: false,
+  staminaGate: null,
+  staminaOwed: 0,
   log: ["The Ashen One stands ready. Three hollows stir across the hall."],
 };
 
 const boardEl = document.getElementById("board")!;
 const logEl = document.getElementById("log")!;
 const weaponEl = document.getElementById("weapon")!;
-const staminaEl = document.getElementById("stamina")!;
+const staminaPileEl = document.getElementById("stamina-pile")!;
+const staminaZoneEl = document.getElementById("stamina-zone")!;
+const staminaPromptEl = document.getElementById("stamina-prompt")!;
 const turnFlashEl = document.getElementById("turn-flash")!;
 const enemyDeckEl = document.getElementById("enemy-deck")!;
 const pileEl = document.getElementById("token-pile")!;
@@ -229,9 +240,9 @@ function reachable(): Set<string> {
         if (free(c) && chebyshev(player.pos, c) <= state.movesLeft) out.add(key(c));
       }
     }
-  } else if (state.phase === "countdown" && !state.busy && !state.repositioned) {
+  } else if (state.phase === "countdown" && !inputLocked() && !state.repositioned) {
     const dist = state.dodgeArmed ? DODGE_SQUARES : STEP_SQUARES;
-    if (!state.dodgeArmed || player.stamina >= DODGE_COST) {
+    if (!state.dodgeArmed || staminaAvailable() >= DODGE_COST) {
       for (let d = 0; d < 8; d++) {
         const s = step(d as Dir);
         const c = { x: player.pos.x + s.x * dist, y: player.pos.y + s.y * dist };
@@ -304,9 +315,141 @@ function render(): void {
 
   renderEnemyDeck();
   renderPile();
+  renderStamina();
   renderWeapon();
   renderShield();
   renderHud();
+}
+
+// True when the player must finish a stamina drag (or an animation) first.
+function inputLocked(): boolean {
+  return state.busy || state.staminaGate != null;
+}
+
+// Stamina still free to spend this enemy turn (pile minus what's already owed).
+function staminaAvailable(): number {
+  return state.player.stamina - state.staminaOwed;
+}
+
+// --- Stamina pile + spend zone (drag tokens to spend / replenish) ---
+
+let staminaDrag: { dir: "spend" | "replenish"; ghost: HTMLElement } | null = null;
+
+function staminaTokenEl(): HTMLElement {
+  const t = document.createElement("span");
+  t.className = "stamina-token";
+  return t;
+}
+
+function renderStamina(): void {
+  const pile = state.player.stamina;
+  const zone = state.player.maxStamina - pile;
+  const gate = state.staminaGate;
+
+  staminaPileEl.replaceChildren();
+  for (let i = 0; i < pile; i++) {
+    const t = staminaTokenEl();
+    if (gate?.dir === "spend") {
+      t.classList.add("draggable");
+      t.addEventListener("pointerdown", (e) => startStaminaDrag("spend", e));
+    }
+    staminaPileEl.appendChild(t);
+  }
+  staminaZoneEl.replaceChildren();
+  for (let i = 0; i < zone; i++) {
+    const t = staminaTokenEl();
+    if (gate?.dir === "replenish") {
+      t.classList.add("draggable");
+      t.addEventListener("pointerdown", (e) => startStaminaDrag("replenish", e));
+    }
+    staminaZoneEl.appendChild(t);
+  }
+
+  staminaPileEl.classList.toggle("drop-active", gate?.dir === "replenish");
+  staminaZoneEl.classList.toggle("drop-active", gate?.dir === "spend");
+  staminaPromptEl.textContent = gate
+    ? gate.dir === "spend"
+      ? `Drag ${gate.remaining} to the spend zone`
+      : `Drag ${gate.remaining} back to your pile`
+    : "";
+}
+
+function startStaminaDrag(dir: "spend" | "replenish", e: PointerEvent): void {
+  if (state.staminaGate?.dir !== dir) return;
+  e.preventDefault();
+  const ghost = staminaTokenEl();
+  ghost.classList.add("stamina-ghost");
+  document.body.appendChild(ghost);
+  staminaDrag = { dir, ghost };
+  moveStaminaGhost(e);
+  window.addEventListener("pointermove", moveStaminaGhost);
+  window.addEventListener("pointerup", endStaminaDrag);
+}
+
+function moveStaminaGhost(e: PointerEvent): void {
+  if (!staminaDrag) return;
+  staminaDrag.ghost.style.left = `${e.clientX}px`;
+  staminaDrag.ghost.style.top = `${e.clientY}px`;
+}
+
+function endStaminaDrag(e: PointerEvent): void {
+  window.removeEventListener("pointermove", moveStaminaGhost);
+  window.removeEventListener("pointerup", endStaminaDrag);
+  if (!staminaDrag) return;
+  const dir = staminaDrag.dir;
+  staminaDrag.ghost.remove();
+  staminaDrag = null;
+
+  const targetEl = dir === "spend" ? staminaZoneEl : staminaPileEl;
+  const r = targetEl.getBoundingClientRect();
+  const inside =
+    e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  if (inside) commitStamina(dir);
+}
+
+function commitStamina(dir: "spend" | "replenish"): void {
+  const gate = state.staminaGate;
+  if (!gate || gate.dir !== dir) return;
+  if (dir === "spend") {
+    if (state.player.stamina <= 0) return;
+    state.player.stamina -= 1;
+  } else {
+    if (state.player.stamina >= state.player.maxStamina) return;
+    state.player.stamina += 1;
+  }
+  gate.remaining -= 1;
+  if (gate.remaining <= 0) {
+    state.staminaGate = null;
+    const cb = gateOnDone;
+    gateOnDone = null;
+    render();
+    cb?.();
+  } else {
+    render();
+  }
+}
+
+let gateOnDone: (() => void) | null = null;
+
+// Make the player drag `count` tokens (clamped to what's possible) before
+// running onDone. Resolves immediately if nothing is owed.
+function requireStamina(
+  dir: "spend" | "replenish",
+  count: number,
+  onDone: () => void
+): void {
+  const room =
+    dir === "spend"
+      ? state.player.stamina
+      : state.player.maxStamina - state.player.stamina;
+  const n = Math.min(count, room);
+  if (n <= 0) {
+    onDone();
+    return;
+  }
+  state.staminaGate = { dir, remaining: n };
+  gateOnDone = onDone;
+  render();
 }
 
 function hpBadge(hp: number, cls: string): HTMLElement {
@@ -324,9 +467,6 @@ function idBadge(id: number): HTMLElement {
 }
 
 function renderHud(): void {
-  staminaEl.textContent = String(state.player.stamina);
-  staminaEl.classList.toggle("empty", state.player.stamina <= 0);
-
   logEl.replaceChildren(
     ...state.log.map((line) => {
       const d = document.createElement("div");
@@ -350,15 +490,15 @@ function renderCountdown(): void {
 }
 
 function updateInteractivity(): void {
-  const playerActive = state.phase === "player" && !state.busy;
+  const playerActive = state.phase === "player" && !inputLocked();
   turnLeftBtn.disabled = !playerActive;
   turnRightBtn.disabled = !playerActive;
   endBtn.disabled = !playerActive;
   dodgeBtn.disabled = !(
     state.phase === "countdown" &&
-    !state.busy &&
+    !inputLocked() &&
     !state.repositioned &&
-    state.player.stamina >= DODGE_COST
+    staminaAvailable() >= DODGE_COST
   );
   dodgeBtn.classList.toggle("armed", state.dodgeArmed);
   document.body.classList.toggle("locked-scroll", state.phase !== "player");
@@ -778,7 +918,7 @@ function targetSquares(atk: Attack): Coord[] {
 // --- Player movement (click-and-drag the token) ---
 
 function canMoveNow(): boolean {
-  if (state.busy) return false;
+  if (inputLocked()) return false;
   if (state.phase === "player") return state.movesLeft > 0;
   if (state.phase === "countdown") return !state.repositioned;
   return false;
@@ -849,8 +989,8 @@ function moveTo(dest: Coord): void {
     render();
   } else if (state.phase === "countdown") {
     if (state.dodgeArmed) {
-      state.player.stamina -= DODGE_COST;
-      log(`Dodged to ${dest.x}, ${dest.y} (−${DODGE_COST} stamina).`);
+      state.staminaOwed += Math.min(DODGE_COST, staminaAvailable());
+      log(`Dodged to ${dest.x}, ${dest.y} (owe ${DODGE_COST} stamina).`);
     } else {
       log(`Stepped to ${dest.x}, ${dest.y}.`);
     }
@@ -863,7 +1003,7 @@ function moveTo(dest: Coord): void {
 }
 
 function rotate(left: boolean): void {
-  if (state.phase !== "player" || state.busy) return;
+  if (state.phase !== "player" || inputLocked()) return;
   state.player.facing = left
     ? turnLeft(state.player.facing)
     : turnRight(state.player.facing);
@@ -871,22 +1011,22 @@ function rotate(left: boolean): void {
 }
 
 function toggleStage(atk: Attack): void {
-  if (state.phase !== "player" || state.busy) return;
+  if (state.phase !== "player" || inputLocked()) return;
   state.stagedAttack = state.stagedAttack === atk ? null : atk;
   if (state.stagedAttack) state.stagedBlock = false; // one action per turn
   render();
 }
 
 function toggleBlock(): void {
-  if (state.phase !== "player" || state.busy) return;
+  if (state.phase !== "player" || inputLocked()) return;
   state.stagedBlock = !state.stagedBlock;
   if (state.stagedBlock) state.stagedAttack = null;
   render();
 }
 
 function armDodge(): void {
-  if (state.phase !== "countdown" || state.busy || state.repositioned) return;
-  if (state.player.stamina < DODGE_COST) return;
+  if (state.phase !== "countdown" || inputLocked() || state.repositioned) return;
+  if (staminaAvailable() < DODGE_COST) return;
   resumeAudio();
   state.dodgeArmed = !state.dodgeArmed;
   state.selected = true;
@@ -897,8 +1037,6 @@ function armDodge(): void {
 
 function performAttack(atk: Attack, onDone: () => void): void {
   const targets = targetSquares(atk).filter((c) => inBounds(c, WIDTH, HEIGHT));
-  state.player.stamina -= atk.staminaCost;
-  state.attacksUsed += 1;
   state.busy = true;
   state.selected = false;
   log(`You strike — ${atk.name}. (−${atk.staminaCost} stamina)`);
@@ -946,19 +1084,18 @@ function startPlayerTurn(): void {
   state.flippedCards = new Set();
   state.cardsSlid = false;
   state.draggingCardIndex = null;
+  state.staminaOwed = 0;
   state.countdownNum = 0;
-  state.player.stamina = Math.min(
-    state.player.maxStamina,
-    state.player.stamina + STAMINA_REGEN
-  );
   log("— Your turn —");
   flashTurn("Your turn");
   renderCountdown();
   render();
+  // Replenish: drag up to STAMINA_REGEN tokens from the zone back to the pile.
+  requireStamina("replenish", STAMINA_REGEN, () => {});
 }
 
 function endTurn(): void {
-  if (state.phase !== "player" || state.busy) return;
+  if (state.phase !== "player" || inputLocked()) return;
   resumeAudio();
   state.selected = false;
 
@@ -974,7 +1111,11 @@ function endTurn(): void {
     state.player.stamina >= atk.staminaCost;
 
   if (atk && canAttack) {
-    performAttack(atk, beginEnemyPhase);
+    // Pay the attack's stamina by dragging, then resolve it.
+    requireStamina("spend", atk.staminaCost, () => {
+      state.attacksUsed += 1;
+      performAttack(atk, beginEnemyPhase);
+    });
   } else {
     beginEnemyPhase();
   }
@@ -1106,7 +1247,7 @@ function startCountdown(): void {
 
 // Player clicks a face-down card to flip it and resolve every token on it.
 function flipCard(i: number): void {
-  if (state.phase !== "revealing" || state.busy) return;
+  if (state.phase !== "revealing" || inputLocked()) return;
   const picks = state.selections.filter((s) => s.cardIndex === i);
   if (picks.length === 0 || state.flippedCards.has(i)) return;
 
@@ -1188,7 +1329,7 @@ function afterFlip(): void {
 // During reset, clicking a face-up card flips it back; once all are reset, the
 // cards slide home and the next turn begins.
 function unflipCard(i: number): void {
-  if (state.phase !== "resetting" || state.busy) return;
+  if (state.phase !== "resetting" || inputLocked()) return;
   if (!state.flippedCards.has(i)) return;
   state.flippedCards.delete(i);
   render();
@@ -1198,7 +1339,11 @@ function unflipCard(i: number): void {
     render();
     setTimeout(() => {
       state.selections = [];
-      startPlayerTurn();
+      // Pay the stamina spent this enemy turn (dodge + block + kick), then go.
+      requireStamina("spend", state.staminaOwed, () => {
+        state.staminaOwed = 0;
+        startPlayerTurn();
+      });
     }, CARD_SLIDE_MS);
   }
 }
@@ -1208,9 +1353,9 @@ function applyEnemyHit(card: EnemyCard, enemy: EnemyToken, blocked: boolean): vo
   let msg: string;
 
   if (blocked) {
-    // Damage hits stamina first; any overflow spills to health.
-    const absorbed = Math.min(player.stamina, card.damage);
-    player.stamina -= absorbed;
+    // Damage is absorbed by stamina (reserved as owed); overflow spills to HP.
+    const absorbed = Math.min(staminaAvailable(), card.damage);
+    state.staminaOwed += absorbed;
     const overflow = card.damage - absorbed;
     if (overflow > 0) player.hp -= overflow;
     msg = `Hollow #${enemy.id}'s ${card.name} blocked — stamina absorbs ${absorbed}`;
@@ -1221,8 +1366,9 @@ function applyEnemyHit(card: EnemyCard, enemy: EnemyToken, blocked: boolean): vo
   }
 
   if (card.staminaDamage) {
-    player.stamina = Math.max(0, player.stamina - card.staminaDamage);
-    msg += ` (−${card.staminaDamage} stamina)`;
+    const lost = Math.min(staminaAvailable(), card.staminaDamage);
+    state.staminaOwed += lost;
+    msg += ` (−${lost} stamina)`;
   }
   if (card.knockback) {
     const dx = Math.sign(player.pos.x - enemy.pos.x);
