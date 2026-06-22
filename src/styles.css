@@ -1046,3 +1046,75 @@ body.locked-scroll {
   color: var(--ember-bright);
   text-align: center;
 }
+
+/* --- Enemy stat & brain card --- */
+
+#enemy-stats {
+  margin-bottom: 12px;
+}
+
+.stat-card {
+  background: linear-gradient(160deg, #2a1614 0%, #1a0e0c 100%);
+  border: 2px solid #5a2420;
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+
+.stat-card-title {
+  text-align: center;
+  color: #e7b3a0;
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(90, 36, 32, 0.7);
+}
+
+.stat-grid {
+  display: grid;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+}
+
+.stat-label {
+  color: #9a7a5a;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  padding-right: 8px;
+  text-align: right;
+}
+
+.stat-cell {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(90, 36, 32, 0.5);
+  color: #ede4d4;
+}
+
+.stat-cell.empty {
+  color: #5a4d44;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.stat-cell.stat-id {
+  color: #fff;
+  font-weight: 700;
+  background: radial-gradient(circle at 35% 30%, #b5483b, #7a1f17);
+  border-color: #2a0d0a;
+}
+
+.stat-cell.stat-id.empty {
+  background: rgba(60, 30, 28, 0.4);
+  color: #6a4a44;
+}
+
+.stat-cell.stat-hp {
+  color: #ffd9cf;
+}

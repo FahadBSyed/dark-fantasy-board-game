@@ -196,6 +196,7 @@ const staminaZoneEl = document.getElementById("stamina-zone")!;
 const staminaPromptEl = document.getElementById("stamina-prompt")!;
 const turnFlashEl = document.getElementById("turn-flash")!;
 const enemyDeckEl = document.getElementById("enemy-deck")!;
+const enemyStatsEl = document.getElementById("enemy-stats")!;
 const pileEl = document.getElementById("token-pile")!;
 const countdownEl = document.getElementById("countdown")!;
 const turnLeftBtn = document.getElementById("turn-left") as HTMLButtonElement;
@@ -330,6 +331,7 @@ function render(): void {
     }
   }
 
+  renderEnemyStats();
   renderEnemyDeck();
   renderPile();
   renderStamina();
@@ -512,6 +514,56 @@ function updateInteractivity(): void {
   turnRightBtn.disabled = !playerActive;
   endBtn.disabled = !playerActive;
   document.body.classList.toggle("locked-scroll", state.phase !== "player");
+}
+
+// --- Enemy stat & brain card (one shared card per enemy type) ---
+
+const MAX_ENEMY_ID = 5;
+
+// A single card with five columns (enemy IDs 1-5) and three rows: id, current
+// health, and a reserved row for special rules / status effects.
+function renderEnemyStats(): void {
+  enemyStatsEl.replaceChildren();
+
+  const card = document.createElement("div");
+  card.className = "stat-card";
+
+  const title = document.createElement("div");
+  title.className = "stat-card-title";
+  title.textContent = HOLLOW_AXEMAN.name;
+  card.appendChild(title);
+
+  const grid = document.createElement("div");
+  grid.className = "stat-grid";
+  grid.style.gridTemplateColumns = `auto repeat(${MAX_ENEMY_ID}, 30px)`;
+
+  const byId = new Map(state.enemies.map((e) => [e.id, e]));
+
+  const addRow = (label: string, cells: (string | number)[], cls: string) => {
+    const lab = document.createElement("div");
+    lab.className = "stat-label";
+    lab.textContent = label;
+    grid.appendChild(lab);
+    for (let id = 1; id <= MAX_ENEMY_ID; id++) {
+      const cell = document.createElement("div");
+      const v = cells[id - 1];
+      const empty = v === "-" || v === "" || v == null;
+      cell.className = "stat-cell " + cls + (empty ? " empty" : "");
+      cell.textContent = empty ? "–" : String(v);
+      grid.appendChild(cell);
+    }
+  };
+
+  const ids = Array.from({ length: MAX_ENEMY_ID }, (_, i) => i + 1);
+  const hp = ids.map((id) => byId.get(id)?.hp ?? "-");
+  const status = ids.map(() => "-");
+
+  addRow("ID", ids, "stat-id");
+  addRow("HP", hp, "stat-hp");
+  addRow("✦", status, "stat-status");
+
+  card.appendChild(grid);
+  enemyStatsEl.appendChild(card);
 }
 
 // --- Enemy deck (one shared deck above the grid) ---
