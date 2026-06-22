@@ -66,6 +66,8 @@ const MAX_HP = 5;
 const ENEMY_MOVES_PER_TURN = 3;
 const ENEMY_STEP_MS = 240;
 const CARD_SLIDE_MS = 360;
+const CARD_FLIP_MS = 520; // matches the card-inner flip transition
+const RESOLVE_GAP_MS = 280; // beat between enemies resolving
 const FLASH_MS = 260;
 const COUNTDOWN_SECONDS = 3;
 const ENGAGE_RANGE = 2;
@@ -114,7 +116,7 @@ interface State {
   stagedBlock: boolean; // raise guard this turn (instead of attacking)
   blocking: boolean; // guard is up during the enemy resolution
   selections: Selection[]; // enemy card picks this turn
-  cardFlipped: boolean; // all selected cards flip together
+  flippedCards: Set<number>; // card indices revealed so far (sequential)
   countdownNum: number;
   dodgeArmed: boolean;
   repositioned: boolean;
@@ -158,7 +160,7 @@ const state: State = {
   stagedBlock: false,
   blocking: false,
   selections: [],
-  cardFlipped: false,
+  flippedCards: new Set(),
   countdownNum: 0,
   dodgeArmed: false,
   repositioned: false,
@@ -354,7 +356,7 @@ function renderEnemyDeck(): void {
   cards.forEach((card, i) => {
     const picks = state.selections.filter((s) => s.cardIndex === i);
     const selected = picks.length > 0;
-    const flipped = selected && state.cardFlipped;
+    const flipped = selected && state.flippedCards.has(i);
 
     const el = document.createElement("div");
     el.className =
@@ -771,7 +773,7 @@ function startPlayerTurn(): void {
   state.stagedBlock = false;
   state.blocking = false;
   state.selections = [];
-  state.cardFlipped = false;
+  state.flippedCards = new Set();
   state.countdownNum = 0;
   state.player.stamina = Math.min(
     state.player.maxStamina,
@@ -876,7 +878,7 @@ function beginEnemyAttack(): void {
   }
 
   state.selections = selections;
-  state.cardFlipped = false;
+  state.flippedCards = new Set();
   state.dodgeArmed = false;
   state.repositioned = false;
   state.selected = true;
@@ -908,11 +910,11 @@ function startCountdown(): void {
   setTimeout(tick, 1000);
 }
 
-// Flip all selected cards and resolve them left-to-right (by card order).
+// Reveal each selected card in turn — flip, flash, resolve — left-to-right,
+// one enemy at a time, so the pacing mirrors a tabletop.
 function resolveEnemyAttacks(): void {
   const cards = deck();
   state.busy = true;
-  state.cardFlipped = true;
   state.selected = false;
   state.dodgeArmed = false;
   render();
@@ -921,46 +923,61 @@ function resolveEnemyAttacks(): void {
     .map((s) => {
       const enemy = state.enemies.find((e) => e.id === s.enemyId);
       if (!enemy) return null;
-      const card = cards[s.cardIndex];
-      const targets = squaresForOffsets(card.pattern, enemy.pos, enemy.facing).filter(
-        (c) => inBounds(c, WIDTH, HEIGHT)
-      );
-      return { cardIndex: s.cardIndex, enemy, card, targets };
+      return { cardIndex: s.cardIndex, enemy, card: cards[s.cardIndex] };
     })
     .filter((p): p is NonNullable<typeof p> => p !== null)
-    .sort((a, b) => a.cardIndex - b.cardIndex); // resolve left-to-right
+    .sort((a, b) => a.cardIndex - b.cardIndex);
 
-  const allTargets = plan.flatMap((p) => p.targets);
-  for (const t of allTargets) cellEls.get(key(t))?.classList.add("flash-target");
+  let i = 0;
+  const next = () => {
+    if (i >= plan.length || state.player.hp <= 0) {
+      finishEnemyAttacks();
+      return;
+    }
+    resolveOne(plan[i], () => {
+      i += 1;
+      setTimeout(next, RESOLVE_GAP_MS);
+    });
+  };
+  next();
+}
+
+function resolveOne(
+  p: { cardIndex: number; enemy: EnemyToken; card: EnemyCard },
+  done: () => void
+): void {
+  // Flip this enemy's card face-up.
+  state.flippedCards.add(p.cardIndex);
+  render();
 
   setTimeout(() => {
-    for (const t of allTargets) cellEls.get(key(t))?.classList.remove("flash-target");
+    const targets = squaresForOffsets(p.card.pattern, p.enemy.pos, p.enemy.facing).filter(
+      (c) => inBounds(c, WIDTH, HEIGHT)
+    );
+    for (const t of targets) cellEls.get(key(t))?.classList.add("flash-target");
 
-    let anyHit = false;
-    for (const p of plan) {
-      if (p.targets.some((t) => sameCoord(t, state.player.pos))) {
-        // Blocked if the guard is up and the attacker stands in the guard arc.
+    setTimeout(() => {
+      for (const t of targets) cellEls.get(key(t))?.classList.remove("flash-target");
+      const hit = targets.some((t) => sameCoord(t, state.player.pos));
+
+      if (hit) {
         const blocked =
           state.blocking &&
           guardedSquares().some((g) => sameCoord(g, p.enemy.pos));
         applyEnemyHit(p.card, p.enemy, blocked);
-        anyHit = true;
+        const el = cellEls.get(key(state.player.pos));
+        el?.classList.add("flash-hit");
+        render();
+        setTimeout(() => {
+          el?.classList.remove("flash-hit");
+          done();
+        }, FLASH_MS);
       } else {
         log(`Hollow #${p.enemy.id}'s ${p.card.name} misses.`);
+        done();
       }
-    }
-
-    if (anyHit) {
-      const el = cellEls.get(key(state.player.pos));
-      el?.classList.add("flash-hit");
-      setTimeout(() => {
-        el?.classList.remove("flash-hit");
-        finishEnemyAttacks();
-      }, FLASH_MS);
-    } else {
-      finishEnemyAttacks();
-    }
-  }, FLASH_MS);
+    }, FLASH_MS);
+  }, CARD_FLIP_MS);
 }
 
 function applyEnemyHit(card: EnemyCard, enemy: EnemyToken, blocked: boolean): void {
@@ -999,7 +1016,7 @@ function applyEnemyHit(card: EnemyCard, enemy: EnemyToken, blocked: boolean): vo
 
 function finishEnemyAttacks(): void {
   state.selections = [];
-  state.cardFlipped = false;
+  state.flippedCards = new Set();
   state.busy = false;
   state.countdownNum = 0;
   renderCountdown();
