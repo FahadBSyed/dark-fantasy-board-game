@@ -1,13 +1,11 @@
-// Pass 4: the enemy attack.
+// Pass 5: multiple enemies sharing one deck.
 //
-// Player turn: move (up to 5), rotate (Q/E), stage an attack, End turn.
-// Enemy turn: the hollow advances, then — if in range — rolls a d10 to pick an
-// attack card (slid halfway out, still face-down so only its telegraph + range
-// show). A 3-second countdown beeps each second; during it the player may step
-// one square (click the token, then a highlighted square) or Dodge two squares
-// for 1 stamina (foot icon on the dock). The card then flips and resolves: if
-// the player is on a struck square they take damage (and any knockback /
-// stamina hit). Reach 0 HP and you die.
+// Up to several hollows, each with a number on its icon, share a single attack
+// deck above the grid. On the enemy turn every hollow advances, then each one
+// in range rolls a d10 to pick a card; that card slides out (still face-down)
+// with a red numbered token per rolling enemy placed on it. One 3-second
+// countdown then runs (step one square, or Dodge two for 1 stamina), after
+// which all selected cards flip and resolve left-to-right against the player.
 
 import {
   chebyshev,
@@ -29,8 +27,6 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 type TokenKind = "player" | "enemy";
 
-// A circular body with a triangular pointer showing facing. Authored pointing
-// North (up); rotated by facing * 45° (8 compass steps).
 function makeTokenSvg(facing: Dir, kind: TokenKind): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 40 40");
@@ -62,12 +58,12 @@ const MAX_STAMINA = 5;
 const STAMINA_REGEN = 2;
 const MAX_HP = 5;
 const ENEMY_MOVES_PER_TURN = 3;
-const ENEMY_STEP_MS = 280;
-const CARD_SLIDE_MS = 360; // let the selected card finish sliding before the clock
+const ENEMY_STEP_MS = 240;
+const CARD_SLIDE_MS = 360;
 const FLASH_MS = 260;
 const COUNTDOWN_SECONDS = 3;
-const ENGAGE_RANGE = 2; // enemy only attacks within this distance
-const STEP_SQUARES = 1; // free reposition during countdown
+const ENGAGE_RANGE = 2;
+const STEP_SQUARES = 1;
 const DODGE_SQUARES = 2;
 const DODGE_COST = 1;
 
@@ -82,6 +78,7 @@ interface PlayerToken {
 }
 
 interface EnemyToken {
+  id: number; // shown on the icon and on its deck tokens
   pos: Coord;
   facing: Dir;
   hp: number;
@@ -89,31 +86,51 @@ interface EnemyToken {
   template: EnemyTemplate;
 }
 
-// player: free movement turn. enemyMove: hollow walking. countdown: reaction
-// window. dead: player defeated.
+// Which card an enemy rolled this turn.
+interface Selection {
+  enemyId: number;
+  cardIndex: number;
+  roll: number;
+}
+
 type Phase = "player" | "enemyMove" | "countdown" | "dead";
 
 interface State {
   player: PlayerToken;
-  enemy: EnemyToken | null;
+  enemies: EnemyToken[];
   phase: Phase;
   movesLeft: number;
   attacksUsed: number;
   selected: boolean;
-  busy: boolean; // true during attack animations; locks input
+  busy: boolean;
   stagedAttack: Attack | null;
-  // Enemy attack in progress:
-  enemyCardIndex: number | null; // selected card, slid out
-  cardFlipped: boolean;
-  countdownNum: number; // seconds shown; 0 = none
-  dodgeArmed: boolean; // next countdown click is a dodge
-  repositioned: boolean; // player already moved this countdown
+  selections: Selection[]; // enemy card picks this turn
+  cardFlipped: boolean; // all selected cards flip together
+  countdownNum: number;
+  dodgeArmed: boolean;
+  repositioned: boolean;
   log: string[];
+}
+
+function spawnEnemies(): EnemyToken[] {
+  const spots: Coord[] = [
+    { x: 2, y: 1 },
+    { x: 4, y: 0 },
+    { x: 6, y: 1 },
+  ];
+  return spots.map((pos, i) => ({
+    id: i + 1,
+    pos,
+    facing: Dir.S,
+    hp: HOLLOW_AXEMAN.maxHp,
+    maxHp: HOLLOW_AXEMAN.maxHp,
+    template: HOLLOW_AXEMAN,
+  }));
 }
 
 const state: State = {
   player: {
-    pos: { x: 4, y: 7 },
+    pos: { x: 4, y: 8 },
     facing: Dir.N,
     hp: MAX_HP,
     maxHp: MAX_HP,
@@ -121,25 +138,19 @@ const state: State = {
     maxStamina: MAX_STAMINA,
     weapon: STRAIGHT_SWORD,
   },
-  enemy: {
-    pos: { x: 4, y: 1 },
-    facing: Dir.S,
-    hp: HOLLOW_AXEMAN.maxHp,
-    maxHp: HOLLOW_AXEMAN.maxHp,
-    template: HOLLOW_AXEMAN,
-  },
+  enemies: spawnEnemies(),
   phase: "player",
   movesLeft: MOVES_PER_TURN,
   attacksUsed: 0,
   selected: false,
   busy: false,
   stagedAttack: null,
-  enemyCardIndex: null,
+  selections: [],
   cardFlipped: false,
   countdownNum: 0,
   dodgeArmed: false,
   repositioned: false,
-  log: ["The Ashen One stands ready. A hollow axeman lurks across the hall."],
+  log: ["The Ashen One stands ready. Three hollows stir across the hall."],
 };
 
 const boardEl = document.getElementById("board")!;
@@ -159,17 +170,27 @@ const key = (c: Coord) => `${c.x},${c.y}`;
 
 function log(msg: string): void {
   state.log.unshift(msg);
-  state.log = state.log.slice(0, 30);
+  state.log = state.log.slice(0, 40);
+}
+
+function deck(): EnemyCard[] {
+  return state.enemies[0]?.template.deck ?? [];
+}
+
+function enemyAt(c: Coord): EnemyToken | undefined {
+  return state.enemies.find((e) => sameCoord(e.pos, c));
+}
+
+function occupied(c: Coord, exceptId?: number): boolean {
+  if (sameCoord(c, state.player.pos)) return true;
+  return state.enemies.some((e) => e.id !== exceptId && sameCoord(e.pos, c));
 }
 
 // Squares the player may move to right now — depends on the phase.
 function reachable(): Set<string> {
   const out = new Set<string>();
-  const { player, enemy } = state;
-  const free = (c: Coord) =>
-    inBounds(c, WIDTH, HEIGHT) &&
-    !sameCoord(c, player.pos) &&
-    !(enemy && sameCoord(c, enemy.pos));
+  const { player } = state;
+  const free = (c: Coord) => inBounds(c, WIDTH, HEIGHT) && !occupied(c);
 
   if (state.phase === "player" && !state.busy && state.selected) {
     for (let y = 0; y < HEIGHT; y++) {
@@ -181,7 +202,6 @@ function reachable(): Set<string> {
   } else if (state.phase === "countdown" && !state.busy && !state.repositioned) {
     const dist = state.dodgeArmed ? DODGE_SQUARES : STEP_SQUARES;
     if (!state.dodgeArmed || player.stamina >= DODGE_COST) {
-      // Straight-line cells exactly `dist` away in any of the 8 directions.
       for (let d = 0; d < 8; d++) {
         const s = step(d as Dir);
         const c = { x: player.pos.x + s.x * dist, y: player.pos.y + s.y * dist };
@@ -214,7 +234,7 @@ function render(): void {
       cellEls.set(key(here), cell);
 
       const isPlayer = sameCoord(here, state.player.pos);
-      const isEnemy = state.enemy != null && sameCoord(here, state.enemy.pos);
+      const enemy = enemyAt(here);
 
       if (preview.has(key(here))) cell.classList.add("target-preview");
 
@@ -224,9 +244,10 @@ function render(): void {
         cell.appendChild(makeTokenSvg(state.player.facing, "player"));
         cell.appendChild(hpBadge(state.player.hp, "player-hp"));
         cell.addEventListener("click", onPlayerClick);
-      } else if (isEnemy && state.enemy) {
-        cell.appendChild(makeTokenSvg(state.enemy.facing, "enemy"));
-        cell.appendChild(hpBadge(state.enemy.hp, "enemy-hp"));
+      } else if (enemy) {
+        cell.appendChild(makeTokenSvg(enemy.facing, "enemy"));
+        cell.appendChild(idBadge(enemy.id));
+        cell.appendChild(hpBadge(enemy.hp, "enemy-hp"));
       } else if (reach.has(key(here))) {
         cell.classList.add(state.dodgeArmed ? "dodge-reach" : "reach");
         cell.addEventListener("click", () => moveTo(here));
@@ -245,6 +266,13 @@ function hpBadge(hp: number, cls: string): HTMLElement {
   const badge = document.createElement("span");
   badge.className = `hp-badge ${cls}`;
   badge.textContent = String(hp);
+  return badge;
+}
+
+function idBadge(id: number): HTMLElement {
+  const badge = document.createElement("span");
+  badge.className = "id-badge";
+  badge.textContent = String(id);
   return badge;
 }
 
@@ -267,14 +295,13 @@ function renderCountdown(): void {
   if (state.countdownNum > 0) {
     countdownEl.textContent = String(state.countdownNum);
     countdownEl.classList.remove("show");
-    void countdownEl.offsetWidth; // restart the pulse each second
+    void countdownEl.offsetWidth;
     countdownEl.classList.add("show");
   } else {
     countdownEl.classList.remove("show");
   }
 }
 
-// Enable dock buttons appropriate to the phase; lock scrolling off-turn.
 function updateInteractivity(): void {
   const playerActive = state.phase === "player" && !state.busy;
   turnLeftBtn.disabled = !playerActive;
@@ -290,14 +317,16 @@ function updateInteractivity(): void {
   document.body.classList.toggle("locked-scroll", state.phase !== "player");
 }
 
-// --- Enemy deck (skeuomorphic cards above the grid) ---
+// --- Enemy deck (one shared deck above the grid) ---
 
 function renderEnemyDeck(): void {
   enemyDeckEl.replaceChildren();
-  if (!state.enemy) return;
+  const cards = deck();
+  if (cards.length === 0) return;
 
-  state.enemy.template.deck.forEach((card, i) => {
-    const selected = state.enemyCardIndex === i;
+  cards.forEach((card, i) => {
+    const picks = state.selections.filter((s) => s.cardIndex === i);
+    const selected = picks.length > 0;
     const flipped = selected && state.cardFlipped;
 
     const el = document.createElement("div");
@@ -306,11 +335,23 @@ function renderEnemyDeck(): void {
 
     const inner = document.createElement("div");
     inner.className = "card-inner";
-
     inner.appendChild(makeCardBack(card));
     inner.appendChild(makeCardFront(card));
-
     el.appendChild(inner);
+
+    // Numbered tokens for each enemy that rolled this card.
+    if (picks.length) {
+      const tokens = document.createElement("div");
+      tokens.className = "card-tokens";
+      for (const p of picks) {
+        const t = document.createElement("span");
+        t.className = "card-token";
+        t.textContent = String(p.enemyId);
+        tokens.appendChild(t);
+      }
+      el.appendChild(tokens);
+    }
+
     enemyDeckEl.appendChild(el);
   });
 }
@@ -352,8 +393,8 @@ function makeCardFront(card: EnemyCard): HTMLElement {
 
   const dmg = document.createElement("div");
   dmg.className = "card-dmg";
-  const extra = card.knockback ? " · knockback" : "";
   const sta = card.staminaDamage ? ` · −${card.staminaDamage} stam` : "";
+  const extra = card.knockback ? " · knockback" : "";
   dmg.textContent = `${card.damage} dmg${sta}${extra}`;
 
   front.append(name, pair, dmg);
@@ -466,8 +507,6 @@ function makeSwordArt(): SVGSVGElement {
   return svg;
 }
 
-// A small visual of an attack diagram. The attacker ('^') is a triangle
-// pointing in `facing`; `enemy` tints it red instead of green.
 function makeDiagram(diagram: string, facing: Dir, enemy: boolean): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "diagram";
@@ -516,8 +555,7 @@ function onPlayerClick(): void {
 }
 
 function moveTo(dest: Coord): void {
-  if (state.busy || !inBounds(dest, WIDTH, HEIGHT)) return;
-  if (state.enemy && sameCoord(dest, state.enemy.pos)) return;
+  if (state.busy || !inBounds(dest, WIDTH, HEIGHT) || occupied(dest)) return;
 
   if (state.phase === "player") {
     if (!state.selected) return;
@@ -570,7 +608,7 @@ function armDodge(): void {
   render();
 }
 
-// --- Player attack resolution (staged on End turn) ---
+// --- Player attack (staged on End turn) ---
 
 function performAttack(atk: Attack, onDone: () => void): void {
   const targets = targetSquares(atk).filter((c) => inBounds(c, WIDTH, HEIGHT));
@@ -585,31 +623,29 @@ function performAttack(atk: Attack, onDone: () => void): void {
 
   setTimeout(() => {
     for (const t of targets) cellEls.get(key(t))?.classList.remove("flash-target");
-    const enemy = state.enemy;
-    const hit = enemy != null && targets.some((t) => sameCoord(t, enemy.pos));
+    const hits = state.enemies.filter((e) => targets.some((t) => sameCoord(t, e.pos)));
 
-    if (hit && enemy) {
-      const el = cellEls.get(key(enemy.pos));
-      el?.classList.add("flash-hit");
-      setTimeout(() => {
-        el?.classList.remove("flash-hit");
-        enemy.hp -= atk.damage;
-        if (enemy.hp <= 0) {
-          log("The hollow is cut down.");
-          state.enemy = null;
-        } else {
-          log(`The hollow takes ${atk.damage}. (${enemy.hp} HP left)`);
-        }
-        state.busy = false;
-        render();
-        onDone();
-      }, FLASH_MS);
-    } else {
+    if (hits.length === 0) {
       log("The blade meets only air.");
       state.busy = false;
       render();
       onDone();
+      return;
     }
+
+    for (const e of hits) cellEls.get(key(e.pos))?.classList.add("flash-hit");
+    setTimeout(() => {
+      for (const e of hits) cellEls.get(key(e.pos))?.classList.remove("flash-hit");
+      for (const e of hits) {
+        e.hp -= atk.damage;
+        if (e.hp <= 0) log(`Hollow #${e.id} is cut down.`);
+        else log(`Hollow #${e.id} takes ${atk.damage}. (${e.hp} HP left)`);
+      }
+      state.enemies = state.enemies.filter((e) => e.hp > 0);
+      state.busy = false;
+      render();
+      onDone();
+    }, FLASH_MS);
   }, FLASH_MS);
 }
 
@@ -619,7 +655,7 @@ function startPlayerTurn(): void {
   state.phase = "player";
   state.movesLeft = MOVES_PER_TURN;
   state.attacksUsed = 0;
-  state.enemyCardIndex = null;
+  state.selections = [];
   state.cardFlipped = false;
   state.countdownNum = 0;
   state.player.stamina = Math.min(
@@ -652,7 +688,7 @@ function endTurn(): void {
 }
 
 function beginEnemyPhase(): void {
-  if (!state.enemy) {
+  if (state.enemies.length === 0) {
     startPlayerTurn();
     return;
   }
@@ -660,65 +696,74 @@ function beginEnemyPhase(): void {
   log("— Enemy turn —");
   flashTurn("Enemy turn");
   render();
-  setTimeout(() => enemyStep(0), ENEMY_STEP_MS);
+  setTimeout(moveEnemiesThen, ENEMY_STEP_MS);
 }
 
-// One step of the enemy's advance toward the player.
-function enemyStep(stepsTaken: number): void {
-  const enemy = state.enemy;
-  if (!enemy) {
-    startPlayerTurn();
-    return;
-  }
+// Advance each enemy in turn, then begin the attack roll.
+function moveEnemiesThen(): void {
+  let i = 0;
+  const next = () => {
+    if (i >= state.enemies.length) {
+      beginEnemyAttack();
+      return;
+    }
+    moveEnemy(state.enemies[i], 0, () => {
+      i += 1;
+      next();
+    });
+  };
+  next();
+}
+
+function moveEnemy(enemy: EnemyToken, stepsTaken: number, done: () => void): void {
   const player = state.player;
   const dx = player.pos.x - enemy.pos.x;
   const dy = player.pos.y - enemy.pos.y;
-
   const facing = dirFromDelta(dx, dy);
   if (facing !== null) enemy.facing = facing;
 
   const adjacent = chebyshev(enemy.pos, player.pos) <= 1;
-  if (stepsTaken >= ENEMY_MOVES_PER_TURN || adjacent || facing === null) {
+  const nextCell = { x: enemy.pos.x + Math.sign(dx), y: enemy.pos.y + Math.sign(dy) };
+  const blocked = !inBounds(nextCell, WIDTH, HEIGHT) || occupied(nextCell, enemy.id);
+
+  if (stepsTaken >= ENEMY_MOVES_PER_TURN || adjacent || facing === null || blocked) {
     render();
-    beginEnemyAttack();
+    done();
     return;
   }
 
-  enemy.pos = { x: enemy.pos.x + Math.sign(dx), y: enemy.pos.y + Math.sign(dy) };
-  log(`The hollow advances to ${enemy.pos.x}, ${enemy.pos.y}.`);
+  enemy.pos = nextCell;
   render();
-  setTimeout(() => enemyStep(stepsTaken + 1), ENEMY_STEP_MS);
+  setTimeout(() => moveEnemy(enemy, stepsTaken + 1, done), ENEMY_STEP_MS);
 }
 
-// Roll a d10, pick a card, slide it out, and start the countdown.
+// Each in-range enemy rolls a d10 and picks a card.
 function beginEnemyAttack(): void {
-  const enemy = state.enemy;
-  if (!enemy) {
-    startPlayerTurn();
-    return;
+  const cards = deck();
+  const selections: Selection[] = [];
+
+  for (const e of state.enemies) {
+    if (chebyshev(e.pos, state.player.pos) > ENGAGE_RANGE) continue;
+    const roll = 1 + Math.floor(Math.random() * 10);
+    const cardIndex = (roll - 1) % cards.length;
+    selections.push({ enemyId: e.id, cardIndex, roll });
+    log(`Hollow #${e.id} rolls ${roll} → card ${cardIndex + 1}.`);
   }
-  if (chebyshev(enemy.pos, state.player.pos) > ENGAGE_RANGE) {
-    log("The hollow stalks closer, out of reach.");
+
+  if (selections.length === 0) {
+    log("The hollows close in, still out of reach.");
     startPlayerTurn();
     return;
   }
 
-  const deck = enemy.template.deck;
-  const roll = 1 + Math.floor(Math.random() * 10);
-  const idx = (roll - 1) % deck.length; // wrap when the roll exceeds the deck
-  state.enemyCardIndex = idx;
+  state.selections = selections;
   state.cardFlipped = false;
   state.dodgeArmed = false;
   state.repositioned = false;
-  state.selected = true; // pre-select so the player can reposition fast
+  state.selected = true;
   state.phase = "countdown";
-  log(`d10 → ${roll}: the hollow readies its ${idx + 1}${ordinal(idx + 1)} card.`);
-  render(); // card slides forward; start the clock once it settles
+  render(); // cards slide out with their tokens
   setTimeout(startCountdown, CARD_SLIDE_MS);
-}
-
-function ordinal(n: number): string {
-  return n === 1 ? "st" : n === 2 ? "nd" : n === 3 ? "rd" : "th";
 }
 
 function startCountdown(): void {
@@ -738,66 +783,78 @@ function startCountdown(): void {
       state.countdownNum = 0;
       renderCountdown();
       blare();
-      resolveEnemyAttack();
+      resolveEnemyAttacks();
     }
   };
   setTimeout(tick, 1000);
 }
 
-function resolveEnemyAttack(): void {
-  const enemy = state.enemy;
-  const idx = state.enemyCardIndex;
-  if (!enemy || idx === null) {
-    startPlayerTurn();
-    return;
-  }
-  const card = enemy.template.deck[idx];
-
+// Flip all selected cards and resolve them left-to-right (by card order).
+function resolveEnemyAttacks(): void {
+  const cards = deck();
   state.busy = true;
   state.cardFlipped = true;
   state.selected = false;
   state.dodgeArmed = false;
-  render(); // flip the card face-up
+  render();
 
-  const targets = squaresForOffsets(card.pattern, enemy.pos, enemy.facing).filter(
-    (c) => inBounds(c, WIDTH, HEIGHT)
-  );
-  for (const t of targets) cellEls.get(key(t))?.classList.add("flash-target");
+  const plan = state.selections
+    .map((s) => {
+      const enemy = state.enemies.find((e) => e.id === s.enemyId);
+      if (!enemy) return null;
+      const card = cards[s.cardIndex];
+      const targets = squaresForOffsets(card.pattern, enemy.pos, enemy.facing).filter(
+        (c) => inBounds(c, WIDTH, HEIGHT)
+      );
+      return { cardIndex: s.cardIndex, enemy, card, targets };
+    })
+    .filter((p): p is NonNullable<typeof p> => p !== null)
+    .sort((a, b) => a.cardIndex - b.cardIndex); // resolve left-to-right
+
+  const allTargets = plan.flatMap((p) => p.targets);
+  for (const t of allTargets) cellEls.get(key(t))?.classList.add("flash-target");
 
   setTimeout(() => {
-    for (const t of targets) cellEls.get(key(t))?.classList.remove("flash-target");
-    const hit = targets.some((t) => sameCoord(t, state.player.pos));
+    for (const t of allTargets) cellEls.get(key(t))?.classList.remove("flash-target");
 
-    if (hit) {
+    let anyHit = false;
+    for (const p of plan) {
+      if (p.targets.some((t) => sameCoord(t, state.player.pos))) {
+        applyEnemyHit(p.card, p.enemy);
+        anyHit = true;
+      } else {
+        log(`Hollow #${p.enemy.id}'s ${p.card.name} misses.`);
+      }
+    }
+
+    if (anyHit) {
       const el = cellEls.get(key(state.player.pos));
       el?.classList.add("flash-hit");
       setTimeout(() => {
         el?.classList.remove("flash-hit");
-        applyEnemyHit(card);
-        finishEnemyAttack();
+        finishEnemyAttacks();
       }, FLASH_MS);
     } else {
-      log(`You evade the ${card.name}.`);
-      finishEnemyAttack();
+      finishEnemyAttacks();
     }
   }, FLASH_MS);
 }
 
-function applyEnemyHit(card: EnemyCard): void {
-  const { player, enemy } = state;
+function applyEnemyHit(card: EnemyCard, enemy: EnemyToken): void {
+  const player = state.player;
   player.hp -= card.damage;
-  let msg = `${card.name} lands — ${card.damage} damage.`;
+  let msg = `Hollow #${enemy.id}'s ${card.name} lands — ${card.damage} damage.`;
 
   if (card.staminaDamage) {
     player.stamina = Math.max(0, player.stamina - card.staminaDamage);
     msg += ` (−${card.staminaDamage} stamina)`;
   }
-  if (card.knockback && enemy) {
+  if (card.knockback) {
     const dx = Math.sign(player.pos.x - enemy.pos.x);
     const dy = Math.sign(player.pos.y - enemy.pos.y);
     for (let i = 0; i < card.knockback; i++) {
       const next = { x: player.pos.x + dx, y: player.pos.y + dy };
-      if (!inBounds(next, WIDTH, HEIGHT) || sameCoord(next, enemy.pos)) break;
+      if (!inBounds(next, WIDTH, HEIGHT) || occupied(next)) break;
       player.pos = next;
     }
     msg += " You are knocked back.";
@@ -805,8 +862,8 @@ function applyEnemyHit(card: EnemyCard): void {
   log(msg);
 }
 
-function finishEnemyAttack(): void {
-  state.enemyCardIndex = null;
+function finishEnemyAttacks(): void {
+  state.selections = [];
   state.cardFlipped = false;
   state.busy = false;
   state.countdownNum = 0;
@@ -826,7 +883,7 @@ function flashTurn(text: string): void {
   turnFlashEl.textContent = text;
   turnFlashEl.classList.toggle("died", text === "YOU DIED");
   turnFlashEl.classList.remove("show");
-  void turnFlashEl.offsetWidth; // restart the CSS animation
+  void turnFlashEl.offsetWidth;
   turnFlashEl.classList.add("show");
 }
 

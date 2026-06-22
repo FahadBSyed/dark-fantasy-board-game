@@ -746,3 +746,51 @@ body.locked-scroll {
   animation: none;
   opacity: 1;
 }
+
+/* --- Enemy number on its icon --- */
+
+.id-badge {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(120, 24, 20, 0.9);
+  border: 1px solid #2a0d0a;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* --- Numbered tokens dropped on a selected card --- */
+
+.card-tokens {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  z-index: 6;
+}
+
+.card-token {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #e0584a, #8d1f17);
+  border: 1px solid #2a0d0a;
+  color: #fff;
+  font-size: 0.74rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.6);
+}
