@@ -102,6 +102,70 @@ export function squaresFor(
   });
 }
 
+// An attack/block square expressed as a raw grid offset from the attacker,
+// authored relative to facing North. Used for multi-cell patterns (e.g. a
+// 5-wide slash) that don't lie on a single compass ray.
+export interface Offset {
+  dx: number;
+  dy: number;
+}
+
+export type OffsetPattern = ReadonlyArray<Offset>;
+
+// Parse an ASCII attack diagram into offsets. 'X' (or 'x') marks a targeted
+// square, '^' marks the attacker; every other character is empty space. The
+// diagram is read assuming the attacker faces North.
+//
+//   XXXXX
+//   --^--
+//
+// yields the five squares one row ahead, spanning two left to two right.
+export function parsePattern(diagram: string): Offset[] {
+  const rows = diagram.replace(/^\n+|\n+$/g, "").split("\n");
+  let ox = 0;
+  let oy = 0;
+  rows.forEach((row, y) => {
+    const i = row.indexOf("^");
+    if (i >= 0) {
+      ox = i;
+      oy = y;
+    }
+  });
+  const out: Offset[] = [];
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      const ch = row[x].toLowerCase();
+      if (ch === "x") out.push({ dx: x - ox, dy: y - oy });
+    }
+  });
+  return out;
+}
+
+// Orient an offset pattern to any of the 8 facings and resolve to absolute
+// grid coords. Each cell is read in the attacker's own basis: dx is "strafe"
+// (rightward in the North-facing diagram) and -dy is "forward" (up in the
+// diagram). We rebuild that basis from the facing — forward = the facing's
+// unit step, right = the step 90° clockwise — so the pattern stays integer and
+// keeps its footprint. On cardinals this is an exact rotation; on diagonals it
+// shears the pattern out along the diagonal (a 5-wide line becomes a 5-long
+// diagonal line), which is the intended behaviour.
+export function squaresForOffsets(
+  pattern: OffsetPattern,
+  origin: Coord,
+  facing: Dir
+): Coord[] {
+  const fwd = STEP[facing];
+  const right = STEP[rotateDir(facing, Dir.E)]; // 90° clockwise from forward
+  return pattern.map(({ dx, dy }) => {
+    const s = dx; // strafe
+    const f = -dy; // forward
+    return {
+      x: origin.x + s * right.x + f * fwd.x,
+      y: origin.y + s * right.y + f * fwd.y,
+    };
+  });
+}
+
 // The compass direction matching a step delta (each component -1, 0, or 1).
 // Returns null only when the delta is (0, 0).
 export function dirFromDelta(dx: number, dy: number): Dir | null {

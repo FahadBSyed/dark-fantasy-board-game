@@ -10,7 +10,7 @@
     <div id="app">
       <header id="banner">
         <h1>The Hollow Gauntlet</h1>
-        <p id="subtitle">pass 1 — movement &amp; orientation</p>
+        <p id="subtitle">pass 3 — stamina &amp; attacks</p>
       </header>
 
       <main id="stage">
@@ -26,11 +26,13 @@
           <p id="hint">
             Click the token to select it, then click a highlighted square to
             move (up to 5 squares per turn). Use the buttons (or Q / E) to
-            rotate.
+            rotate 90°. Attacks cost stamina — pick one from your weapon card.
           </p>
           <div id="log" aria-label="log"></div>
         </aside>
       </main>
+
+      <section id="weapon" aria-label="weapon card"></section>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

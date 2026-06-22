@@ -105,6 +105,45 @@ body {
   cursor: pointer;
 }
 
+/* Squares an attack would hit, while hovering its card. */
+.cell.target-preview {
+  box-shadow: inset 0 0 0 2px rgba(255, 120, 90, 0.75);
+}
+
+/* Targeted squares flashing during an attack. */
+.cell.flash-target {
+  background: #6e1f1c;
+  box-shadow: inset 0 0 14px rgba(255, 59, 48, 0.95);
+}
+
+/* A struck creature's cell flashing red. */
+.cell.flash-hit {
+  animation: hitflash 0.26s ease;
+}
+
+@keyframes hitflash {
+  0%,
+  100% {
+    background: transparent;
+  }
+  45% {
+    background: #ff3b30;
+  }
+}
+
+.hp-badge {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  font-size: 0.7rem;
+  color: #f2e4d6;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 8px;
+  padding: 0 5px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
 .token-svg {
   width: 40px;
   height: 40px;
@@ -224,4 +263,84 @@ button:hover {
 
 #log div {
   padding: 2px 0;
+}
+
+/* --- Weapon card --- */
+
+#weapon {
+  margin: 24px auto 0;
+  max-width: 720px;
+  background: var(--panel);
+  border: 1px solid var(--grid-line);
+  border-radius: 4px;
+  padding: 14px 16px;
+}
+
+.weapon-title {
+  color: var(--ember);
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--grid-line);
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+
+.attack-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.attack-card {
+  width: 120px;
+  background: #1b1b24;
+  border: 1px solid var(--grid-line);
+  border-radius: 4px;
+  padding: 10px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.attack-card:not(.disabled):hover {
+  border-color: var(--ember);
+  box-shadow: 0 0 14px rgba(200, 115, 47, 0.3);
+}
+
+.attack-card.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.attack-name {
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.attack-stats {
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  margin-top: 2px;
+}
+
+.diagram {
+  display: inline-grid;
+  gap: 2px;
+  justify-content: center;
+}
+
+.diagram .dot {
+  width: 12px;
+  height: 12px;
+  background: #262630;
+  border-radius: 2px;
+}
+
+.diagram .dot.hit {
+  background: var(--ember);
+}
+
+.diagram .dot.self {
+  background: #5c7a4a;
 }
