@@ -71,9 +71,8 @@ const CARD_FLIP_MS = 520; // matches the card-inner flip transition
 const FLASH_MS = 260;
 const ENGAGE_RANGE = 2; // a hollow must be within this to attack
 const COUNTDOWN_SECONDS = 5;
-const STEP_SQUARES = 1;
-const DODGE_SQUARES = 2;
-const DODGE_COST = 1;
+const REACT_MAX_SQUARES = 2; // max squares the player may move while reacting
+const REACT_COST = 1; // stamina per square moved while reacting
 
 interface PlayerToken {
   pos: Coord;
@@ -131,7 +130,6 @@ interface State {
   cardsSlid: boolean; // selected cards have slid forward
   draggingCardIndex: number | null; // card highlighted as the active drop target
   countdownNum: number;
-  dodgeArmed: boolean;
   repositioned: boolean;
   // Stamina is a physical token economy: pile (player.stamina) + spend zone
   // (maxStamina - stamina) is conserved. A gate forces the player to drag
@@ -184,7 +182,6 @@ const state: State = {
   cardsSlid: false,
   draggingCardIndex: null,
   countdownNum: 0,
-  dodgeArmed: false,
   repositioned: false,
   staminaGate: null,
   staminaOwed: 0,
@@ -201,7 +198,6 @@ const turnFlashEl = document.getElementById("turn-flash")!;
 const enemyDeckEl = document.getElementById("enemy-deck")!;
 const pileEl = document.getElementById("token-pile")!;
 const countdownEl = document.getElementById("countdown")!;
-const dodgeBtn = document.getElementById("dodge") as HTMLButtonElement;
 const turnLeftBtn = document.getElementById("turn-left") as HTMLButtonElement;
 const turnRightBtn = document.getElementById("turn-right") as HTMLButtonElement;
 const endBtn = document.getElementById("end-turn") as HTMLButtonElement;
@@ -227,6 +223,35 @@ function occupied(c: Coord, exceptId?: number): boolean {
   return state.enemies.some((e) => e.id !== exceptId && sameCoord(e.pos, c));
 }
 
+// While reacting, the cells reachable by a path of unoccupied squares, mapped
+// to the number of steps (= stamina cost) to get there. Limited to 2 squares
+// and to what stamina allows; you can't move through an enemy.
+function reactReach(): Map<string, number> {
+  const out = new Map<string, number>();
+  const maxSteps = Math.min(REACT_MAX_SQUARES, Math.floor(staminaAvailable() / REACT_COST));
+  if (maxSteps <= 0) return out;
+
+  const visited = new Set<string>([key(state.player.pos)]);
+  let frontier: Coord[] = [state.player.pos];
+  for (let stepN = 1; stepN <= maxSteps; stepN++) {
+    const nextFrontier: Coord[] = [];
+    for (const c of frontier) {
+      for (let d = 0; d < 8; d++) {
+        const s = step(d as Dir);
+        const n = { x: c.x + s.x, y: c.y + s.y };
+        const k = key(n);
+        if (visited.has(k)) continue;
+        if (!inBounds(n, WIDTH, HEIGHT) || occupied(n)) continue;
+        visited.add(k);
+        out.set(k, stepN);
+        nextFrontier.push(n);
+      }
+    }
+    frontier = nextFrontier;
+  }
+  return out;
+}
+
 // Squares the player may move to right now — depends on the phase.
 function reachable(): Set<string> {
   const out = new Set<string>();
@@ -241,15 +266,7 @@ function reachable(): Set<string> {
       }
     }
   } else if (state.phase === "countdown" && !inputLocked() && !state.repositioned) {
-    const dist = state.dodgeArmed ? DODGE_SQUARES : STEP_SQUARES;
-    if (!state.dodgeArmed || staminaAvailable() >= DODGE_COST) {
-      for (let d = 0; d < 8; d++) {
-        const s = step(d as Dir);
-        const c = { x: player.pos.x + s.x * dist, y: player.pos.y + s.y * dist };
-        const mid = { x: player.pos.x + s.x, y: player.pos.y + s.y };
-        if (free(c) && (dist === 1 || free(mid))) out.add(key(c));
-      }
-    }
+    for (const k of reactReach().keys()) out.add(k);
   }
   return out;
 }
@@ -305,7 +322,7 @@ function render(): void {
         cell.appendChild(idBadge(enemy.id));
         cell.appendChild(hpBadge(enemy.hp, "enemy-hp"));
       } else if (reach.has(key(here))) {
-        cell.classList.add(state.dodgeArmed ? "dodge-reach" : "reach");
+        cell.classList.add("reach");
         cell.addEventListener("click", () => moveTo(here));
       }
 
@@ -494,13 +511,6 @@ function updateInteractivity(): void {
   turnLeftBtn.disabled = !playerActive;
   turnRightBtn.disabled = !playerActive;
   endBtn.disabled = !playerActive;
-  dodgeBtn.disabled = !(
-    state.phase === "countdown" &&
-    !inputLocked() &&
-    !state.repositioned &&
-    staminaAvailable() >= DODGE_COST
-  );
-  dodgeBtn.classList.toggle("armed", state.dodgeArmed);
   document.body.classList.toggle("locked-scroll", state.phase !== "player");
 }
 
@@ -920,7 +930,9 @@ function targetSquares(atk: Attack): Coord[] {
 function canMoveNow(): boolean {
   if (inputLocked()) return false;
   if (state.phase === "player") return state.movesLeft > 0;
-  if (state.phase === "countdown") return !state.repositioned;
+  if (state.phase === "countdown") {
+    return !state.repositioned && staminaAvailable() >= REACT_COST;
+  }
   return false;
 }
 
@@ -988,16 +1000,15 @@ function moveTo(dest: Coord): void {
     if (state.movesLeft === 0) log("Out of moves.");
     render();
   } else if (state.phase === "countdown") {
-    if (state.dodgeArmed) {
-      state.staminaOwed += Math.min(DODGE_COST, staminaAvailable());
-      log(`Dodged to ${dest.x}, ${dest.y} (owe ${DODGE_COST} stamina).`);
-    } else {
-      log(`Stepped to ${dest.x}, ${dest.y}.`);
-    }
+    const cost = reactReach().get(key(dest)) ?? 0;
+    if (cost <= 0) return;
+    state.staminaOwed += cost * REACT_COST;
     state.player.pos = dest;
     state.repositioned = true;
-    state.dodgeArmed = false;
     state.selected = false;
+    const dropped = state.blocking ? " Guard dropped." : "";
+    state.blocking = false; // moving cancels the block
+    log(`Reacted to ${dest.x}, ${dest.y} (owe ${cost} stamina).${dropped}`);
     render();
   }
 }
@@ -1024,14 +1035,6 @@ function toggleBlock(): void {
   render();
 }
 
-function armDodge(): void {
-  if (state.phase !== "countdown" || inputLocked() || state.repositioned) return;
-  if (staminaAvailable() < DODGE_COST) return;
-  resumeAudio();
-  state.dodgeArmed = !state.dodgeArmed;
-  state.selected = true;
-  render();
-}
 
 // --- Player attack (staged on End turn) ---
 
@@ -1211,7 +1214,6 @@ function onAllPlaced(): void {
   render();
   setTimeout(() => {
     state.phase = "countdown";
-    state.dodgeArmed = false;
     state.repositioned = false;
     state.selected = true;
     startCountdown();
@@ -1237,7 +1239,6 @@ function startCountdown(): void {
       blare();
       state.phase = "revealing";
       state.selected = false;
-      state.dodgeArmed = false;
       log("Flip each card to resolve its attack.");
       render();
     }
@@ -1396,14 +1397,12 @@ function flashTurn(text: string): void {
 turnLeftBtn.addEventListener("click", () => rotate(true));
 turnRightBtn.addEventListener("click", () => rotate(false));
 endBtn.addEventListener("click", endTurn);
-dodgeBtn.addEventListener("click", armDodge);
 
 window.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
   if (k === "q") rotate(true);
   else if (k === "e") rotate(false);
   else if (k === "enter") endTurn();
-  else if (k === " " || k === "f") armDodge();
   else return;
   e.preventDefault();
 });
