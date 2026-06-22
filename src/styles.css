@@ -109,33 +109,33 @@ body {
   width: 40px;
   height: 40px;
   overflow: visible;
-  filter: drop-shadow(0 0 8px rgba(181, 72, 59, 0.7));
+  filter: drop-shadow(0 0 8px rgba(90, 150, 90, 0.7));
 }
 
 .token-body {
-  fill: var(--player);
-  stroke: #2a0d0a;
+  fill: #5c7a4a;
+  stroke: #141d10;
   stroke-width: 1.5;
 }
 
 .token-pointer {
-  fill: #e8ddcf;
-  stroke: #2a0d0a;
+  fill: #cdd6bf;
+  stroke: #141d10;
   stroke-width: 1;
 }
 
 .token-svg.enemy {
-  filter: drop-shadow(0 0 8px rgba(90, 150, 90, 0.7));
+  filter: drop-shadow(0 0 8px rgba(181, 72, 59, 0.7));
 }
 
 .token-svg.enemy .token-body {
-  fill: #5c7a4a;
-  stroke: #141d10;
+  fill: var(--player);
+  stroke: #2a0d0a;
 }
 
 .token-svg.enemy .token-pointer {
-  fill: #cdd6bf;
-  stroke: #141d10;
+  fill: #e8ddcf;
+  stroke: #2a0d0a;
 }
 
 .cell.selected .token-svg {
