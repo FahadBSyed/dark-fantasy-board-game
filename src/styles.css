@@ -105,16 +105,35 @@ body {
   cursor: pointer;
 }
 
-.token {
-  color: var(--player);
-  text-shadow: 0 0 12px rgba(181, 72, 59, 0.8);
-  font-size: 1.9rem;
-  line-height: 1;
+.token-svg {
+  width: 40px;
+  height: 40px;
+  overflow: visible;
+  filter: drop-shadow(0 0 8px rgba(181, 72, 59, 0.7));
 }
 
-.cell.selected .token {
-  color: var(--ember-bright);
-  text-shadow: 0 0 16px rgba(240, 162, 75, 0.95);
+.token-body {
+  fill: var(--player);
+  stroke: #2a0d0a;
+  stroke-width: 1.5;
+}
+
+.token-pointer {
+  fill: #e8ddcf;
+  stroke: #2a0d0a;
+  stroke-width: 1;
+}
+
+.cell.selected .token-svg {
+  filter: drop-shadow(0 0 12px rgba(240, 162, 75, 0.95));
+}
+
+.cell.selected .token-body {
+  fill: var(--ember-bright);
+}
+
+.cell.selected .token-pointer {
+  fill: #fff4e2;
 }
 
 #hud {

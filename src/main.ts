@@ -7,13 +7,40 @@
 import {
   chebyshev,
   Dir,
-  DIR_GLYPH,
   DIR_NAME,
   inBounds,
   turnLeft,
   turnRight,
   type Coord,
 } from "./grid";
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// Player token: a circular body with a triangular pointer showing facing.
+// Authored pointing North (up); rotated by facing * 45° (8 compass steps).
+function makeTokenSvg(facing: Dir): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 40 40");
+  svg.classList.add("token-svg");
+
+  const g = document.createElementNS(SVG_NS, "g");
+  g.setAttribute("transform", `rotate(${facing * 45} 20 20)`);
+
+  const body = document.createElementNS(SVG_NS, "circle");
+  body.setAttribute("cx", "20");
+  body.setAttribute("cy", "21");
+  body.setAttribute("r", "11");
+  body.classList.add("token-body");
+
+  const pointer = document.createElementNS(SVG_NS, "polygon");
+  pointer.setAttribute("points", "20,2 13,15 27,15");
+  pointer.classList.add("token-pointer");
+
+  g.appendChild(body);
+  g.appendChild(pointer);
+  svg.appendChild(g);
+  return svg;
+}
 
 const WIDTH = 10;
 const HEIGHT = 10;
@@ -76,10 +103,7 @@ function render(): void {
       if (isPlayer) {
         cell.classList.add("player");
         if (state.selected) cell.classList.add("selected");
-        const token = document.createElement("span");
-        token.className = "token";
-        token.textContent = DIR_GLYPH[state.facing];
-        cell.appendChild(token);
+        cell.appendChild(makeTokenSvg(state.facing));
         cell.addEventListener("click", () => {
           state.selected = !state.selected;
           render();
