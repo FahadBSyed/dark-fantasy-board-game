@@ -925,10 +925,13 @@ body.locked-scroll {
 
 .enemy-card.flippable {
   cursor: pointer;
+  border-radius: 9px;
 }
 
-.enemy-card.flippable:hover .card-inner {
-  filter: brightness(1.15);
+/* Highlight with a glow, NOT a filter — a filter on the preserve-3d
+   .card-inner flattens it and exposes the mirrored back face. */
+.enemy-card.flippable:hover {
+  box-shadow: 0 0 0 2px var(--ember), 0 0 18px rgba(200, 115, 47, 0.55);
 }
 
 /* Up to five tokens can sit on a single card. */
@@ -936,4 +939,28 @@ body.locked-scroll {
   flex-wrap: wrap;
   max-width: 96px;
   justify-content: center;
+}
+
+/* --- Drag the player token to move --- */
+
+.cell.grabbable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.token-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 120;
+  opacity: 0.9;
+}
+
+.token-drag-ghost .token-svg {
+  width: 44px;
+  height: 44px;
 }

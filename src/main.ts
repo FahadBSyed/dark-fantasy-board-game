@@ -70,7 +70,7 @@ const CARD_SLIDE_MS = 360;
 const CARD_FLIP_MS = 520; // matches the card-inner flip transition
 const FLASH_MS = 260;
 const ENGAGE_RANGE = 2; // a hollow must be within this to attack
-const COUNTDOWN_SECONDS = 3;
+const COUNTDOWN_SECONDS = 5;
 const STEP_SQUARES = 1;
 const DODGE_SQUARES = 2;
 const DODGE_COST = 1;
@@ -287,7 +287,8 @@ function render(): void {
         if (state.selected) cell.classList.add("selected");
         cell.appendChild(makeTokenSvg(state.player.facing, "player"));
         cell.appendChild(hpBadge(state.player.hp, "player-hp"));
-        cell.addEventListener("click", onPlayerClick);
+        if (canMoveNow()) cell.classList.add("grabbable");
+        cell.addEventListener("pointerdown", startBoardDrag);
       } else if (enemy) {
         cell.appendChild(makeTokenSvg(enemy.facing, "enemy"));
         cell.appendChild(idBadge(enemy.id));
@@ -774,37 +775,80 @@ function targetSquares(atk: Attack): Coord[] {
   return squaresForOffsets(atk.pattern, state.player.pos, state.player.facing);
 }
 
-// --- Player input ---
+// --- Player movement (click-and-drag the token) ---
 
-function onPlayerClick(): void {
-  if (state.busy) return;
-  if (state.phase === "player") {
-    state.selected = !state.selected;
-    render();
-  } else if (state.phase === "countdown") {
-    state.selected = true;
+function canMoveNow(): boolean {
+  if (state.busy) return false;
+  if (state.phase === "player") return state.movesLeft > 0;
+  if (state.phase === "countdown") return !state.repositioned;
+  return false;
+}
+
+let boardDrag: { ghost: HTMLElement } | null = null;
+
+// Pick up the player token; reachable squares show while it's held.
+function startBoardDrag(e: PointerEvent): void {
+  if (!canMoveNow()) return;
+  e.preventDefault();
+  state.selected = true;
+  const ghost = document.createElement("div");
+  ghost.className = "token-drag-ghost";
+  ghost.appendChild(makeTokenSvg(state.player.facing, "player"));
+  document.body.appendChild(ghost);
+  boardDrag = { ghost };
+  moveBoardGhost(e);
+  window.addEventListener("pointermove", moveBoardGhost);
+  window.addEventListener("pointerup", endBoardDrag);
+  render();
+}
+
+function moveBoardGhost(e: PointerEvent): void {
+  if (!boardDrag) return;
+  boardDrag.ghost.style.left = `${e.clientX}px`;
+  boardDrag.ghost.style.top = `${e.clientY}px`;
+}
+
+function endBoardDrag(e: PointerEvent): void {
+  window.removeEventListener("pointermove", moveBoardGhost);
+  window.removeEventListener("pointerup", endBoardDrag);
+  if (!boardDrag) return;
+  boardDrag.ghost.remove();
+  boardDrag = null;
+
+  const dest = cellUnderPoint(e.clientX, e.clientY);
+  if (dest && reachable().has(key(dest))) {
+    moveTo(dest); // validates and clears selection
+  } else {
+    if (state.phase === "player") state.selected = false;
     render();
   }
 }
 
+function cellUnderPoint(x: number, y: number): Coord | null {
+  for (const [k, el] of cellEls) {
+    const r = el.getBoundingClientRect();
+    if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) {
+      const [cx, cy] = k.split(",").map(Number);
+      return { x: cx, y: cy };
+    }
+  }
+  return null;
+}
+
+// Move to a validated destination (drag drop or a click on a reach cell).
 function moveTo(dest: Coord): void {
-  if (state.busy || !inBounds(dest, WIDTH, HEIGHT) || occupied(dest)) return;
+  if (state.busy || !reachable().has(key(dest))) return;
 
   if (state.phase === "player") {
-    if (!state.selected) return;
     const cost = chebyshev(state.player.pos, dest);
-    if (cost === 0 || cost > state.movesLeft) return;
     state.player.pos = dest;
     state.movesLeft -= cost;
+    state.selected = false;
     log(`Moved to ${dest.x}, ${dest.y} (−${cost}).`);
-    if (state.movesLeft === 0) {
-      state.selected = false;
-      log("Out of moves.");
-    }
+    if (state.movesLeft === 0) log("Out of moves.");
     render();
-  } else if (state.phase === "countdown" && !state.repositioned) {
+  } else if (state.phase === "countdown") {
     if (state.dodgeArmed) {
-      if (state.player.stamina < DODGE_COST) return;
       state.player.stamina -= DODGE_COST;
       log(`Dodged to ${dest.x}, ${dest.y} (−${DODGE_COST} stamina).`);
     } else {
