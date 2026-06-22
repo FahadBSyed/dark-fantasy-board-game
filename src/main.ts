@@ -67,9 +67,7 @@ const MAX_HP = 5;
 const ENEMY_MOVES_PER_TURN = 3;
 const ENEMY_STEP_MS = 240;
 const CARD_SLIDE_MS = 360;
-const TOKEN_DROP_MS = 460; // token thrown onto the card before it slides
 const CARD_FLIP_MS = 520; // matches the card-inner flip transition
-const RESOLVE_GAP_MS = 280; // beat between enemies resolving
 const FLASH_MS = 260;
 const COUNTDOWN_SECONDS = 3;
 const STEP_SQUARES = 1;
@@ -101,9 +99,20 @@ interface Selection {
   enemyId: number;
   cardIndex: number;
   roll: number;
+  placed: boolean; // token has been dragged onto its card
 }
 
-type Phase = "player" | "enemyMove" | "countdown" | "dead";
+// player: free turn. enemyMove: hollows walking. placing: drag tokens onto the
+// rolled cards. countdown: reaction window. revealing: click cards to flip &
+// resolve. resetting: click cards to flip back. dead: defeated.
+type Phase =
+  | "player"
+  | "enemyMove"
+  | "placing"
+  | "countdown"
+  | "revealing"
+  | "resetting"
+  | "dead";
 
 interface State {
   player: PlayerToken;
@@ -117,9 +126,9 @@ interface State {
   stagedBlock: boolean; // raise guard this turn (instead of attacking)
   blocking: boolean; // guard is up during the enemy resolution
   selections: Selection[]; // enemy card picks this turn
-  flippedCards: Set<number>; // card indices revealed so far (sequential)
+  flippedCards: Set<number>; // card indices currently face-up
   cardsSlid: boolean; // selected cards have slid forward
-  tokensDropping: boolean; // play the token-drop animation this render
+  draggingCardIndex: number | null; // card highlighted as the active drop target
   countdownNum: number;
   dodgeArmed: boolean;
   repositioned: boolean;
@@ -165,7 +174,7 @@ const state: State = {
   selections: [],
   flippedCards: new Set(),
   cardsSlid: false,
-  tokensDropping: false,
+  draggingCardIndex: null,
   countdownNum: 0,
   dodgeArmed: false,
   repositioned: false,
@@ -178,6 +187,7 @@ const weaponEl = document.getElementById("weapon")!;
 const staminaEl = document.getElementById("stamina")!;
 const turnFlashEl = document.getElementById("turn-flash")!;
 const enemyDeckEl = document.getElementById("enemy-deck")!;
+const pileEl = document.getElementById("token-pile")!;
 const countdownEl = document.getElementById("countdown")!;
 const dodgeBtn = document.getElementById("dodge") as HTMLButtonElement;
 const turnLeftBtn = document.getElementById("turn-left") as HTMLButtonElement;
@@ -291,6 +301,7 @@ function render(): void {
   }
 
   renderEnemyDeck();
+  renderPile();
   renderWeapon();
   renderShield();
   renderHud();
@@ -360,13 +371,27 @@ function renderEnemyDeck(): void {
 
   cards.forEach((card, i) => {
     const picks = state.selections.filter((s) => s.cardIndex === i);
+    const placedPicks = picks.filter((s) => s.placed);
+    const hasUnplaced = picks.some((s) => !s.placed);
     const selected = picks.length > 0;
     const slid = selected && state.cardsSlid;
-    const flipped = selected && state.flippedCards.has(i);
+    const flipped = state.flippedCards.has(i);
+
+    const awaiting = state.phase === "placing" && hasUnplaced;
+    const dropTarget = state.draggingCardIndex === i;
+    const flippable =
+      (state.phase === "revealing" && selected && !flipped) ||
+      (state.phase === "resetting" && selected && flipped);
 
     const el = document.createElement("div");
     el.className =
-      "enemy-card" + (slid ? " slid" : "") + (flipped ? " flipped" : "");
+      "enemy-card" +
+      (slid ? " slid" : "") +
+      (flipped ? " flipped" : "") +
+      (awaiting ? " awaiting" : "") +
+      (dropTarget ? " drop-target" : "") +
+      (flippable ? " flippable" : "");
+    el.dataset.cardIndex = String(i);
 
     const inner = document.createElement("div");
     inner.className = "card-inner";
@@ -374,21 +399,115 @@ function renderEnemyDeck(): void {
     inner.appendChild(makeCardFront(card));
     el.appendChild(inner);
 
-    // Numbered tokens for each enemy that rolled this card.
-    if (picks.length) {
+    // Tokens already placed on this card.
+    if (placedPicks.length) {
       const tokens = document.createElement("div");
       tokens.className = "card-tokens";
-      for (const p of picks) {
-        const t = document.createElement("span");
-        t.className = "card-token" + (state.tokensDropping ? " dropping" : "");
-        t.textContent = String(p.enemyId);
-        tokens.appendChild(t);
-      }
+      for (const p of placedPicks) tokens.appendChild(tokenChip(p.enemyId));
       el.appendChild(tokens);
+    }
+
+    if (flippable) {
+      el.addEventListener("click", () =>
+        state.phase === "revealing" ? flipCard(i) : unflipCard(i)
+      );
     }
 
     enemyDeckEl.appendChild(el);
   });
+}
+
+function tokenChip(id: number): HTMLElement {
+  const t = document.createElement("span");
+  t.className = "card-token";
+  t.textContent = String(id);
+  return t;
+}
+
+// --- Token pile + drag-and-drop placement ---
+
+let drag: { sel: Selection; ghost: HTMLElement } | null = null;
+
+function renderPile(): void {
+  pileEl.replaceChildren();
+  const unplaced =
+    state.phase === "placing"
+      ? state.selections.filter((s) => !s.placed && drag?.sel !== s)
+      : [];
+
+  if (state.phase !== "placing" || state.selections.every((s) => s.placed)) {
+    pileEl.classList.remove("show");
+    return;
+  }
+  pileEl.classList.add("show");
+
+  const label = document.createElement("div");
+  label.className = "pile-label";
+  label.textContent = "Drag each token onto its glowing card";
+  pileEl.appendChild(label);
+
+  const heap = document.createElement("div");
+  heap.className = "pile-heap";
+  unplaced.forEach((sel, idx) => {
+    const t = tokenChip(sel.enemyId);
+    t.classList.add("pile-token");
+    t.style.transform = `translateX(${idx * 6}px) rotate(${(idx % 2 ? 1 : -1) * 5}deg)`;
+    t.addEventListener("pointerdown", (e) => startDrag(sel, e));
+    heap.appendChild(t);
+  });
+  pileEl.appendChild(heap);
+}
+
+function startDrag(sel: Selection, e: PointerEvent): void {
+  if (state.phase !== "placing" || sel.placed) return;
+  e.preventDefault();
+  const ghost = tokenChip(sel.enemyId);
+  ghost.className = "card-token token-ghost";
+  document.body.appendChild(ghost);
+  drag = { sel, ghost };
+  state.draggingCardIndex = sel.cardIndex; // glow the one correct card
+  moveGhost(e);
+  window.addEventListener("pointermove", moveGhost);
+  window.addEventListener("pointerup", endDrag);
+  render();
+}
+
+function moveGhost(e: PointerEvent): void {
+  if (!drag) return;
+  drag.ghost.style.left = `${e.clientX}px`;
+  drag.ghost.style.top = `${e.clientY}px`;
+}
+
+function endDrag(e: PointerEvent): void {
+  window.removeEventListener("pointermove", moveGhost);
+  window.removeEventListener("pointerup", endDrag);
+  if (!drag) return;
+
+  // Snap only if released over the token's own (correct) card.
+  const target = enemyDeckEl.querySelector<HTMLElement>(
+    `.enemy-card[data-card-index="${drag.sel.cardIndex}"]`
+  );
+  const r = target?.getBoundingClientRect();
+  const inside =
+    r != null &&
+    e.clientX >= r.left &&
+    e.clientX <= r.right &&
+    e.clientY >= r.top &&
+    e.clientY <= r.bottom;
+
+  if (inside) {
+    drag.sel.placed = true;
+    log(`Token #${drag.sel.enemyId} placed on card ${drag.sel.cardIndex + 1}.`);
+  }
+
+  drag.ghost.remove();
+  drag = null;
+  state.draggingCardIndex = null;
+  render();
+
+  if (state.selections.length && state.selections.every((s) => s.placed)) {
+    onAllPlaced();
+  }
 }
 
 function makeCardBack(card: EnemyCard): HTMLElement {
@@ -781,7 +900,7 @@ function startPlayerTurn(): void {
   state.selections = [];
   state.flippedCards = new Set();
   state.cardsSlid = false;
-  state.tokensDropping = false;
+  state.draggingCardIndex = null;
   state.countdownNum = 0;
   state.player.stamina = Math.min(
     state.player.maxStamina,
@@ -866,8 +985,7 @@ function moveEnemy(enemy: EnemyToken, stepsTaken: number, done: () => void): voi
   setTimeout(() => moveEnemy(enemy, stepsTaken + 1, done), ENEMY_STEP_MS);
 }
 
-// Roll one d10 per enemy, drop a numbered token on each chosen card, then slide
-// the chosen cards forward and start the countdown.
+// Roll one d10 per enemy, then hand control to the player to place the tokens.
 function beginEnemyAttack(): void {
   const cards = deck();
   if (state.enemies.length === 0 || cards.length === 0) {
@@ -877,40 +995,36 @@ function beginEnemyAttack(): void {
 
   const selections: Selection[] = state.enemies.map((e) => {
     const roll = 1 + Math.floor(Math.random() * 10);
-    return { enemyId: e.id, roll, cardIndex: (roll - 1) % cards.length };
+    return { enemyId: e.id, roll, cardIndex: (roll - 1) % cards.length, placed: false };
   });
 
-  // 1. Tumble the dice (one per enemy).
   rollDice(
     selections.map((s) => s.roll),
     () => {
       for (const s of selections) {
         log(`Hollow #${s.enemyId} rolls ${s.roll} → card ${s.cardIndex + 1}.`);
       }
-      // 2. Drop the numbered tokens onto the cards (still in their row).
       state.selections = selections;
       state.flippedCards = new Set();
       state.cardsSlid = false;
-      state.tokensDropping = true;
+      state.phase = "placing";
+      log("Place each hollow's token on its card.");
       render();
-
-      // 3. Slide the chosen cards forward.
-      setTimeout(() => {
-        state.tokensDropping = false;
-        state.cardsSlid = true;
-        render();
-
-        // 4. Begin the reaction window.
-        setTimeout(() => {
-          state.phase = "countdown";
-          state.dodgeArmed = false;
-          state.repositioned = false;
-          state.selected = true;
-          startCountdown();
-        }, CARD_SLIDE_MS);
-      }, TOKEN_DROP_MS);
     }
   );
+}
+
+// All tokens placed → slide the chosen cards forward, then run the countdown.
+function onAllPlaced(): void {
+  state.cardsSlid = true;
+  render();
+  setTimeout(() => {
+    state.phase = "countdown";
+    state.dodgeArmed = false;
+    state.repositioned = false;
+    state.selected = true;
+    startCountdown();
+  }, CARD_SLIDE_MS);
 }
 
 function startCountdown(): void {
@@ -930,84 +1044,113 @@ function startCountdown(): void {
       state.countdownNum = 0;
       renderCountdown();
       blare();
-      resolveEnemyAttacks();
+      state.phase = "revealing";
+      state.selected = false;
+      state.dodgeArmed = false;
+      log("Flip each card to resolve its attack.");
+      render();
     }
   };
   setTimeout(tick, 1000);
 }
 
-// Reveal each selected card in turn — flip, flash, resolve — left-to-right,
-// one enemy at a time, so the pacing mirrors a tabletop.
-function resolveEnemyAttacks(): void {
-  const cards = deck();
+// Player clicks a face-down card to flip it and resolve every token on it.
+function flipCard(i: number): void {
+  if (state.phase !== "revealing" || state.busy) return;
+  const picks = state.selections.filter((s) => s.cardIndex === i);
+  if (picks.length === 0 || state.flippedCards.has(i)) return;
+
+  const card = deck()[i];
   state.busy = true;
-  state.selected = false;
-  state.dodgeArmed = false;
-  render();
-
-  const plan = state.selections
-    .map((s) => {
-      const enemy = state.enemies.find((e) => e.id === s.enemyId);
-      if (!enemy) return null;
-      return { cardIndex: s.cardIndex, enemy, card: cards[s.cardIndex] };
-    })
-    .filter((p): p is NonNullable<typeof p> => p !== null)
-    .sort((a, b) => a.cardIndex - b.cardIndex);
-
-  let i = 0;
-  const next = () => {
-    if (i >= plan.length || state.player.hp <= 0) {
-      finishEnemyAttacks();
-      return;
-    }
-    resolveOne(plan[i], () => {
-      i += 1;
-      setTimeout(next, RESOLVE_GAP_MS);
-    });
-  };
-  next();
-}
-
-function resolveOne(
-  p: { cardIndex: number; enemy: EnemyToken; card: EnemyCard },
-  done: () => void
-): void {
-  // Flip this enemy's card face-up.
-  state.flippedCards.add(p.cardIndex);
+  state.flippedCards.add(i);
   render();
 
   setTimeout(() => {
-    const targets = squaresForOffsets(p.card.pattern, p.enemy.pos, p.enemy.facing).filter(
-      (c) => inBounds(c, WIDTH, HEIGHT)
-    );
-    for (const t of targets) cellEls.get(key(t))?.classList.add("flash-target");
+    const plan = picks
+      .map((s) => state.enemies.find((e) => e.id === s.enemyId))
+      .filter((e): e is EnemyToken => e != null)
+      .map((enemy) => ({
+        enemy,
+        targets: squaresForOffsets(card.pattern, enemy.pos, enemy.facing).filter(
+          (c) => inBounds(c, WIDTH, HEIGHT)
+        ),
+      }));
+
+    const allTargets = plan.flatMap((p) => p.targets);
+    for (const t of allTargets) cellEls.get(key(t))?.classList.add("flash-target");
 
     setTimeout(() => {
-      for (const t of targets) cellEls.get(key(t))?.classList.remove("flash-target");
-      const hit = targets.some((t) => sameCoord(t, state.player.pos));
+      for (const t of allTargets) cellEls.get(key(t))?.classList.remove("flash-target");
 
-      if (hit) {
-        // Blocked when the attacker stands in the guarded arc, or the attack's
-        // squares overlap it.
-        const guard = guardedSquares();
-        const blocked =
-          state.blocking &&
-          (guard.some((g) => sameCoord(g, p.enemy.pos)) ||
-            targets.some((t) => guard.some((g) => sameCoord(g, t))));
-        applyEnemyHit(p.card, p.enemy, blocked);
+      let hitPlayer = false;
+      for (const p of plan) {
+        if (p.targets.some((t) => sameCoord(t, state.player.pos))) {
+          const guard = guardedSquares();
+          const blocked =
+            state.blocking &&
+            (guard.some((g) => sameCoord(g, p.enemy.pos)) ||
+              p.targets.some((t) => guard.some((g) => sameCoord(g, t))));
+          applyEnemyHit(card, p.enemy, blocked);
+          hitPlayer = true;
+        } else {
+          log(`Hollow #${p.enemy.id}'s ${card.name} misses.`);
+        }
+      }
+
+      const finish = () => {
+        state.busy = false;
+        afterFlip();
+      };
+
+      if (hitPlayer) {
         const el = cellEls.get(key(state.player.pos));
         el?.classList.add("flash-hit");
         render();
         setTimeout(() => {
           el?.classList.remove("flash-hit");
-          done();
+          finish();
         }, FLASH_MS);
       } else {
-        log(`Hollow #${p.enemy.id}'s ${p.card.name} misses.`);
-        done();
+        finish();
       }
     }, FLASH_MS);
   }, CARD_FLIP_MS);
+}
+
+// After a card resolves: check for death, then for all cards revealed.
+function afterFlip(): void {
+  if (state.player.hp <= 0) {
+    state.phase = "dead";
+    log("You have died.");
+    flashTurn("YOU DIED");
+    render();
+    return;
+  }
+  const rolled = new Set(state.selections.map((s) => s.cardIndex));
+  const allRevealed = [...rolled].every((i) => state.flippedCards.has(i));
+  if (allRevealed) {
+    state.phase = "resetting";
+    log("All cards revealed — click each to flip it back.");
+  }
+  render();
+}
+
+// During reset, clicking a face-up card flips it back; once all are reset, the
+// cards slide home and the next turn begins.
+function unflipCard(i: number): void {
+  if (state.phase !== "resetting" || state.busy) return;
+  if (!state.flippedCards.has(i)) return;
+  state.flippedCards.delete(i);
+  render();
+
+  if (state.flippedCards.size === 0) {
+    state.cardsSlid = false;
+    render();
+    setTimeout(() => {
+      state.selections = [];
+      startPlayerTurn();
+    }, CARD_SLIDE_MS);
+  }
 }
 
 function applyEnemyHit(card: EnemyCard, enemy: EnemyToken, blocked: boolean): void {
@@ -1042,25 +1185,6 @@ function applyEnemyHit(card: EnemyCard, enemy: EnemyToken, blocked: boolean): vo
     msg += " You are knocked back.";
   }
   log(msg);
-}
-
-function finishEnemyAttacks(): void {
-  state.selections = [];
-  state.flippedCards = new Set();
-  state.cardsSlid = false;
-  state.tokensDropping = false;
-  state.busy = false;
-  state.countdownNum = 0;
-  renderCountdown();
-
-  if (state.player.hp <= 0) {
-    state.phase = "dead";
-    log("You have died.");
-    flashTurn("YOU DIED");
-    render();
-    return;
-  }
-  startPlayerTurn();
 }
 
 function flashTurn(text: string): void {

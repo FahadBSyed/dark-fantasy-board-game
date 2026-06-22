@@ -871,3 +871,69 @@ body.locked-scroll {
     opacity: 1;
   }
 }
+
+/* --- Token pile + drag placement --- */
+
+#token-pile {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+#token-pile.show {
+  display: flex;
+}
+
+.pile-label {
+  font-size: 0.78rem;
+  color: var(--ember);
+  font-style: italic;
+}
+
+.pile-heap {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+}
+
+.pile-token {
+  cursor: grab;
+  touch-action: none;
+}
+
+.card-token.token-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%) scale(1.15);
+  pointer-events: none;
+  z-index: 120;
+}
+
+/* Cards still awaiting a token glow; the active drop target glows brighter. */
+.enemy-card.awaiting .card-inner {
+  box-shadow: 0 0 0 2px var(--ember), 0 0 16px rgba(200, 115, 47, 0.55);
+  border-radius: 9px;
+}
+
+.enemy-card.drop-target .card-inner {
+  box-shadow: 0 0 0 3px var(--ember-bright), 0 0 22px rgba(240, 162, 75, 0.85);
+  border-radius: 9px;
+}
+
+.enemy-card.flippable {
+  cursor: pointer;
+}
+
+.enemy-card.flippable:hover .card-inner {
+  filter: brightness(1.15);
+}
+
+/* Up to five tokens can sit on a single card. */
+.card-tokens {
+  flex-wrap: wrap;
+  max-width: 96px;
+  justify-content: center;
+}
