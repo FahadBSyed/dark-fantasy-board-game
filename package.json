@@ -1,0 +1,18 @@
+{
+  "name": "dark-fantasy-board-game",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Combat prototype for a Dark Souls-inspired analog board game.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.5"
+  }
+}

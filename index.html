@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dark Fantasy — Combat Prototype</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="banner">
+        <h1>The Hollow Gauntlet</h1>
+        <p id="subtitle">pass 1 — movement &amp; orientation</p>
+      </header>
+
+      <main id="stage">
+        <div id="board" aria-label="combat grid"></div>
+
+        <aside id="hud">
+          <div id="vitals"></div>
+          <div id="controls">
+            <button id="turn-left" type="button">⟲ Turn left</button>
+            <button id="turn-right" type="button">Turn right ⟳</button>
+            <button id="end-turn" type="button">End turn ⏎</button>
+          </div>
+          <p id="hint">
+            Click the token to select it, then click a highlighted square to
+            move (up to 5 squares per turn). Use the buttons (or Q / E) to
+            rotate.
+          </p>
+          <div id="log" aria-label="log"></div>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
