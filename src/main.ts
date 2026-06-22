@@ -9,7 +9,6 @@
 import {
   chebyshev,
   Dir,
-  DIR_NAME,
   dirFromDelta,
   inBounds,
   sameCoord,
@@ -110,6 +109,7 @@ const boardEl = document.getElementById("board")!;
 const vitalsEl = document.getElementById("vitals")!;
 const logEl = document.getElementById("log")!;
 const weaponEl = document.getElementById("weapon")!;
+const staminaEl = document.getElementById("stamina")!;
 
 // Coordinate ("x,y") -> cell element, rebuilt on every render so the attack
 // flash sequence can target specific squares without a full re-render.
@@ -192,15 +192,14 @@ function render(): void {
 }
 
 function renderHud(): void {
-  const turnLabel = state.turn === "player" ? "Your turn" : "Enemy turn";
-  const enemyHp = state.enemy ? `${state.enemy.hp} / ${state.enemy.maxHp}` : "slain";
-  vitalsEl.innerHTML = `
-    <div><span class="key">Turn</span> · <span class="val">${turnLabel}</span></div>
-    <div><span class="key">Moves left</span> · <span class="val">${state.movesLeft}</span> / ${MOVES_PER_TURN}</div>
-    <div><span class="key">Stamina</span> · <span class="val">${state.player.stamina}</span> / ${state.player.maxStamina}</div>
-    <div><span class="key">Facing</span> · <span class="val">${DIR_NAME[state.player.facing]}</span></div>
-    <div><span class="key">Enemy HP</span> · <span class="val">${enemyHp}</span></div>
-  `;
+  const yours = state.turn === "player";
+  vitalsEl.innerHTML = `<div class="turn-state ${yours ? "you" : "enemy"}">${
+    yours ? "Your turn" : "Enemy turn"
+  }</div>`;
+
+  staminaEl.textContent = String(state.player.stamina);
+  staminaEl.classList.toggle("empty", state.player.stamina <= 0);
+
   logEl.replaceChildren(
     ...state.log.map((line) => {
       const d = document.createElement("div");
@@ -210,18 +209,29 @@ function renderHud(): void {
   );
 }
 
-// Render the weapon card with its attacks below the board.
+// Render the weapon as a skeuomorphic card below the board, with its attacks
+// as selectable options on the card face.
 function renderWeapon(): void {
   const weapon = state.player.weapon;
   weaponEl.replaceChildren();
 
-  const title = document.createElement("div");
-  title.className = "weapon-title";
-  title.textContent = weapon.name;
-  weaponEl.appendChild(title);
+  const card = document.createElement("div");
+  card.className = "weapon-card";
 
-  const row = document.createElement("div");
-  row.className = "attack-row";
+  const corner = document.createElement("div");
+  corner.className = "weapon-corner";
+  corner.textContent = "⚔";
+  card.appendChild(corner);
+
+  const title = document.createElement("div");
+  title.className = "weapon-card-title";
+  title.textContent = weapon.name;
+  card.appendChild(title);
+
+  card.appendChild(makeSwordArt());
+
+  const attacks = document.createElement("div");
+  attacks.className = "weapon-card-attacks";
 
   for (const atk of weapon.attacks) {
     const affordable = state.player.stamina >= atk.staminaCost;
@@ -229,32 +239,73 @@ function renderWeapon(): void {
     const usable = state.turn === "player" && !state.busy && affordable && hasUses;
     const staged = state.stagedAttack === atk;
 
-    const card = document.createElement("div");
-    card.className =
-      "attack-card" + (usable ? "" : " disabled") + (staged ? " staged" : "");
+    const opt = document.createElement("div");
+    opt.className =
+      "attack-option" + (usable ? "" : " disabled") + (staged ? " staged" : "");
 
-    card.appendChild(makeDiagram(atk.diagram));
+    opt.appendChild(makeDiagram(atk.diagram));
+
+    const text = document.createElement("div");
+    text.className = "attack-text";
 
     const name = document.createElement("div");
     name.className = "attack-name";
     name.textContent = atk.name;
-    card.appendChild(name);
+    text.appendChild(name);
 
     const stats = document.createElement("div");
     stats.className = "attack-stats";
     const repeat = atk.usesPerTurn > 1 ? ` · ×${atk.usesPerTurn}/turn` : "";
     stats.textContent = `${atk.damage} dmg · ${atk.staminaCost} stam${repeat}`;
-    card.appendChild(stats);
+    text.appendChild(stats);
+
+    opt.appendChild(text);
 
     // Clicking stages (or un-stages) the attack; it resolves on End turn.
     if (usable || staged) {
-      card.addEventListener("click", () => toggleStage(atk));
+      opt.addEventListener("click", () => toggleStage(atk));
     }
 
-    row.appendChild(card);
+    attacks.appendChild(opt);
   }
 
-  weaponEl.appendChild(row);
+  card.appendChild(attacks);
+  weaponEl.appendChild(card);
+}
+
+// Decorative upright sword for the weapon card face.
+function makeSwordArt(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 64 120");
+  svg.classList.add("weapon-art");
+
+  const blade = document.createElementNS(SVG_NS, "polygon");
+  blade.setAttribute("points", "32,6 38,18 38,72 26,72 26,18");
+  blade.setAttribute("class", "sword-blade");
+
+  const guard = document.createElementNS(SVG_NS, "rect");
+  guard.setAttribute("x", "14");
+  guard.setAttribute("y", "72");
+  guard.setAttribute("width", "36");
+  guard.setAttribute("height", "8");
+  guard.setAttribute("rx", "3");
+  guard.setAttribute("class", "sword-guard");
+
+  const grip = document.createElementNS(SVG_NS, "rect");
+  grip.setAttribute("x", "29");
+  grip.setAttribute("y", "80");
+  grip.setAttribute("width", "6");
+  grip.setAttribute("height", "26");
+  grip.setAttribute("class", "sword-grip");
+
+  const pommel = document.createElementNS(SVG_NS, "circle");
+  pommel.setAttribute("cx", "32");
+  pommel.setAttribute("cy", "110");
+  pommel.setAttribute("r", "5");
+  pommel.setAttribute("class", "sword-guard");
+
+  svg.append(blade, guard, grip, pommel);
+  return svg;
 }
 
 // A small visual of the attack's authored diagram.

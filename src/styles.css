@@ -293,73 +293,168 @@ body {
   padding: 2px 0;
 }
 
-/* --- Weapon card --- */
+/* --- Turn state badge --- */
+
+.turn-state {
+  font-size: 1.1rem;
+  letter-spacing: 0.05em;
+  text-align: center;
+  padding: 6px 0;
+}
+
+.turn-state.you {
+  color: var(--ember);
+  text-shadow: 0 0 14px rgba(200, 115, 47, 0.4);
+}
+
+.turn-state.enemy {
+  color: #b5483b;
+}
+
+/* --- Stamina pip on the dock --- */
+
+.stamina-pip {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #eef3e6;
+  background: linear-gradient(#6f9456, #4d6b3c);
+  border: 1px solid #2c3d22;
+  border-radius: 8px;
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.25),
+    0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.stamina-pip.empty {
+  background: linear-gradient(#5a5a5a, #3a3a3a);
+  border-color: #2a2a2a;
+  color: #9a9a9a;
+}
+
+.dock-divider {
+  width: 1px;
+  height: 28px;
+  background: var(--grid-line);
+}
+
+/* --- Weapon card (skeuomorphic) --- */
 
 #weapon {
-  margin: 24px auto 0;
-  max-width: 720px;
-  background: var(--panel);
-  border: 1px solid var(--grid-line);
-  border-radius: 4px;
-  padding: 14px 16px;
-}
-
-.weapon-title {
-  color: var(--ember);
-  font-size: 1.05rem;
-  letter-spacing: 0.06em;
-  border-bottom: 1px solid var(--grid-line);
-  padding-bottom: 8px;
-  margin-bottom: 12px;
-}
-
-.attack-row {
+  margin-top: 28px;
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  justify-content: center;
 }
 
-.attack-card {
-  width: 120px;
-  background: #1b1b24;
-  border: 1px solid var(--grid-line);
-  border-radius: 4px;
-  padding: 10px;
+.weapon-card {
+  position: relative;
+  width: 240px;
+  padding: 16px 16px 14px;
+  background: linear-gradient(160deg, #2c2419 0%, #1d1812 60%, #161109 100%);
+  border: 2px solid #6a5736;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.4),
+    inset 0 0 22px rgba(0, 0, 0, 0.55);
+}
+
+.weapon-corner {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  color: #8a7142;
+  font-size: 0.9rem;
+}
+
+.weapon-card-title {
   text-align: center;
+  color: #e6c887;
+  font-size: 1.1rem;
+  letter-spacing: 0.06em;
+  text-shadow: 0 1px 2px #000;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(106, 87, 54, 0.5);
+}
+
+.weapon-art {
+  display: block;
+  width: 56px;
+  height: auto;
+  margin: 14px auto;
+  filter: drop-shadow(0 0 8px rgba(230, 200, 135, 0.25));
+}
+
+.sword-blade {
+  fill: #d9dde2;
+  stroke: #8a8f96;
+  stroke-width: 1;
+}
+
+.sword-guard {
+  fill: #caa45a;
+  stroke: #6a5736;
+  stroke-width: 1;
+}
+
+.sword-grip {
+  fill: #5a3d24;
+}
+
+.weapon-card-attacks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.attack-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(106, 87, 54, 0.45);
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
-.attack-card:not(.disabled):hover {
+.attack-option:not(.disabled):hover {
   border-color: var(--ember);
-  box-shadow: 0 0 14px rgba(200, 115, 47, 0.3);
+  box-shadow: 0 0 12px rgba(200, 115, 47, 0.3);
 }
 
-.attack-card.disabled {
-  opacity: 0.4;
+.attack-option.disabled {
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
-.attack-card.staged {
+.attack-option.staged {
   border-color: var(--ember-bright);
   box-shadow: 0 0 16px rgba(240, 162, 75, 0.5);
-  background: #2a2018;
+  background: rgba(240, 162, 75, 0.12);
 }
 
-.attack-card.staged .attack-name::after {
-  content: " ⚔ staged";
-  color: var(--ember-bright);
-  font-size: 0.72rem;
+.attack-text {
+  text-align: left;
 }
 
 .attack-name {
-  margin-top: 8px;
-  color: var(--text);
-  font-size: 0.95rem;
+  color: #ede4d4;
+  font-size: 0.98rem;
+}
+
+.attack-option.staged .attack-name::after {
+  content: " ⚔ staged";
+  color: var(--ember-bright);
+  font-size: 0.7rem;
 }
 
 .attack-stats {
-  color: var(--text-dim);
+  color: #a99a83;
   font-size: 0.72rem;
   margin-top: 2px;
 }
@@ -367,13 +462,13 @@ body {
 .diagram {
   display: inline-grid;
   gap: 2px;
-  justify-content: center;
+  flex-shrink: 0;
 }
 
 .diagram .dot {
-  width: 12px;
-  height: 12px;
-  background: #262630;
+  width: 11px;
+  height: 11px;
+  background: #2b2419;
   border-radius: 2px;
 }
 
