@@ -1053,11 +1053,17 @@ body.locked-scroll {
   margin-bottom: 12px;
 }
 
+/* Landscape, index-card proportions (≈ 5:3). */
 .stat-card {
+  width: 360px;
+  min-height: 216px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   background: linear-gradient(160deg, #2a1614 0%, #1a0e0c 100%);
   border: 2px solid #5a2420;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 14px 16px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
 }
 
@@ -1087,12 +1093,12 @@ body.locked-scroll {
 }
 
 .stat-cell {
-  height: 28px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 4px;
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid rgba(90, 36, 32, 0.5);
   color: #ede4d4;

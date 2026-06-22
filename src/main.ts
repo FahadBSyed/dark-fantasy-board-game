@@ -321,7 +321,6 @@ function render(): void {
       } else if (enemy) {
         cell.appendChild(makeTokenSvg(enemy.facing, "enemy"));
         cell.appendChild(idBadge(enemy.id));
-        cell.appendChild(hpBadge(enemy.hp, "enemy-hp"));
       } else if (reach.has(key(here))) {
         cell.classList.add("reach");
         cell.addEventListener("click", () => moveTo(here));
@@ -535,7 +534,7 @@ function renderEnemyStats(): void {
 
   const grid = document.createElement("div");
   grid.className = "stat-grid";
-  grid.style.gridTemplateColumns = `auto repeat(${MAX_ENEMY_ID}, 30px)`;
+  grid.style.gridTemplateColumns = `auto repeat(${MAX_ENEMY_ID}, 44px)`;
 
   const byId = new Map(state.enemies.map((e) => [e.id, e]));
 
