@@ -69,6 +69,7 @@ const ENEMY_STEP_MS = 240;
 const CARD_SLIDE_MS = 360;
 const CARD_FLIP_MS = 520; // matches the card-inner flip transition
 const FLASH_MS = 260;
+const ENGAGE_RANGE = 2; // a hollow must be within this to attack
 const COUNTDOWN_SECONDS = 3;
 const STEP_SQUARES = 1;
 const DODGE_SQUARES = 2;
@@ -985,15 +986,20 @@ function moveEnemy(enemy: EnemyToken, stepsTaken: number, done: () => void): voi
   setTimeout(() => moveEnemy(enemy, stepsTaken + 1, done), ENEMY_STEP_MS);
 }
 
-// Roll one d10 per enemy, then hand control to the player to place the tokens.
+// Roll one d10 per in-range enemy, then hand control to the player to place the
+// tokens. Only hollows within ENGAGE_RANGE of the player attack.
 function beginEnemyAttack(): void {
   const cards = deck();
-  if (state.enemies.length === 0 || cards.length === 0) {
+  const attackers = state.enemies.filter(
+    (e) => chebyshev(e.pos, state.player.pos) <= ENGAGE_RANGE
+  );
+  if (attackers.length === 0 || cards.length === 0) {
+    if (state.enemies.length) log("The hollows close in, still out of reach.");
     startPlayerTurn();
     return;
   }
 
-  const selections: Selection[] = state.enemies.map((e) => {
+  const selections: Selection[] = attackers.map((e) => {
     const roll = 1 + Math.floor(Math.random() * 10);
     return { enemyId: e.id, roll, cardIndex: (roll - 1) % cards.length, placed: false };
   });
