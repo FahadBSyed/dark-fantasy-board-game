@@ -28,6 +28,7 @@ import {
 } from "./weapons";
 import { HOLLOW_AXEMAN, type EnemyCard, type EnemyTemplate } from "./enemies";
 import { beep, blare, resumeAudio } from "./audio";
+import { rollDice } from "./dice";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -66,11 +67,11 @@ const MAX_HP = 5;
 const ENEMY_MOVES_PER_TURN = 3;
 const ENEMY_STEP_MS = 240;
 const CARD_SLIDE_MS = 360;
+const TOKEN_DROP_MS = 460; // token thrown onto the card before it slides
 const CARD_FLIP_MS = 520; // matches the card-inner flip transition
 const RESOLVE_GAP_MS = 280; // beat between enemies resolving
 const FLASH_MS = 260;
 const COUNTDOWN_SECONDS = 3;
-const ENGAGE_RANGE = 2;
 const STEP_SQUARES = 1;
 const DODGE_SQUARES = 2;
 const DODGE_COST = 1;
@@ -117,6 +118,8 @@ interface State {
   blocking: boolean; // guard is up during the enemy resolution
   selections: Selection[]; // enemy card picks this turn
   flippedCards: Set<number>; // card indices revealed so far (sequential)
+  cardsSlid: boolean; // selected cards have slid forward
+  tokensDropping: boolean; // play the token-drop animation this render
   countdownNum: number;
   dodgeArmed: boolean;
   repositioned: boolean;
@@ -161,6 +164,8 @@ const state: State = {
   blocking: false,
   selections: [],
   flippedCards: new Set(),
+  cardsSlid: false,
+  tokensDropping: false,
   countdownNum: 0,
   dodgeArmed: false,
   repositioned: false,
@@ -356,11 +361,12 @@ function renderEnemyDeck(): void {
   cards.forEach((card, i) => {
     const picks = state.selections.filter((s) => s.cardIndex === i);
     const selected = picks.length > 0;
+    const slid = selected && state.cardsSlid;
     const flipped = selected && state.flippedCards.has(i);
 
     const el = document.createElement("div");
     el.className =
-      "enemy-card" + (selected ? " selected" : "") + (flipped ? " flipped" : "");
+      "enemy-card" + (slid ? " slid" : "") + (flipped ? " flipped" : "");
 
     const inner = document.createElement("div");
     inner.className = "card-inner";
@@ -374,7 +380,7 @@ function renderEnemyDeck(): void {
       tokens.className = "card-tokens";
       for (const p of picks) {
         const t = document.createElement("span");
-        t.className = "card-token";
+        t.className = "card-token" + (state.tokensDropping ? " dropping" : "");
         t.textContent = String(p.enemyId);
         tokens.appendChild(t);
       }
@@ -774,6 +780,8 @@ function startPlayerTurn(): void {
   state.blocking = false;
   state.selections = [];
   state.flippedCards = new Set();
+  state.cardsSlid = false;
+  state.tokensDropping = false;
   state.countdownNum = 0;
   state.player.stamina = Math.min(
     state.player.maxStamina,
@@ -858,33 +866,51 @@ function moveEnemy(enemy: EnemyToken, stepsTaken: number, done: () => void): voi
   setTimeout(() => moveEnemy(enemy, stepsTaken + 1, done), ENEMY_STEP_MS);
 }
 
-// Each in-range enemy rolls a d10 and picks a card.
+// Roll one d10 per enemy, drop a numbered token on each chosen card, then slide
+// the chosen cards forward and start the countdown.
 function beginEnemyAttack(): void {
   const cards = deck();
-  const selections: Selection[] = [];
-
-  for (const e of state.enemies) {
-    if (chebyshev(e.pos, state.player.pos) > ENGAGE_RANGE) continue;
-    const roll = 1 + Math.floor(Math.random() * 10);
-    const cardIndex = (roll - 1) % cards.length;
-    selections.push({ enemyId: e.id, cardIndex, roll });
-    log(`Hollow #${e.id} rolls ${roll} → card ${cardIndex + 1}.`);
-  }
-
-  if (selections.length === 0) {
-    log("The hollows close in, still out of reach.");
+  if (state.enemies.length === 0 || cards.length === 0) {
     startPlayerTurn();
     return;
   }
 
-  state.selections = selections;
-  state.flippedCards = new Set();
-  state.dodgeArmed = false;
-  state.repositioned = false;
-  state.selected = true;
-  state.phase = "countdown";
-  render(); // cards slide out with their tokens
-  setTimeout(startCountdown, CARD_SLIDE_MS);
+  const selections: Selection[] = state.enemies.map((e) => {
+    const roll = 1 + Math.floor(Math.random() * 10);
+    return { enemyId: e.id, roll, cardIndex: (roll - 1) % cards.length };
+  });
+
+  // 1. Tumble the dice (one per enemy).
+  rollDice(
+    selections.map((s) => s.roll),
+    () => {
+      for (const s of selections) {
+        log(`Hollow #${s.enemyId} rolls ${s.roll} → card ${s.cardIndex + 1}.`);
+      }
+      // 2. Drop the numbered tokens onto the cards (still in their row).
+      state.selections = selections;
+      state.flippedCards = new Set();
+      state.cardsSlid = false;
+      state.tokensDropping = true;
+      render();
+
+      // 3. Slide the chosen cards forward.
+      setTimeout(() => {
+        state.tokensDropping = false;
+        state.cardsSlid = true;
+        render();
+
+        // 4. Begin the reaction window.
+        setTimeout(() => {
+          state.phase = "countdown";
+          state.dodgeArmed = false;
+          state.repositioned = false;
+          state.selected = true;
+          startCountdown();
+        }, CARD_SLIDE_MS);
+      }, TOKEN_DROP_MS);
+    }
+  );
 }
 
 function startCountdown(): void {
@@ -1017,6 +1043,8 @@ function applyEnemyHit(card: EnemyCard, enemy: EnemyToken, blocked: boolean): vo
 function finishEnemyAttacks(): void {
   state.selections = [];
   state.flippedCards = new Set();
+  state.cardsSlid = false;
+  state.tokensDropping = false;
   state.busy = false;
   state.countdownNum = 0;
   renderCountdown();
