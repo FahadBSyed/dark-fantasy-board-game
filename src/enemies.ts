@@ -16,6 +16,10 @@ export interface EnemyCard {
   damage: number;
   staminaDamage?: number; // stamina lost on hit
   knockback?: number; // squares the player is shoved away on hit
+  // A second swing (the card's fold-out segment). It resolves in a follow-up
+  // reaction wave when followUpOn is satisfied by the d10 that picked the card.
+  followUp?: EnemyCard;
+  followUpOn?: "oddRoll";
 }
 
 export interface EnemyTemplate {
@@ -40,6 +44,21 @@ XXX
 -^X
 ---`,
   damage: 2,
+  // On an odd d10, the hollow follows the cut with a backswing from the right.
+  followUpOn: "oddRoll",
+  followUp: card({
+    name: "Axe Return",
+    telegraph: "axe from your right",
+    range: 1,
+    diagram: `
+XXX
+-^-`,
+    diagonalDiagram: `
+-XX
+-^X
+---`,
+    damage: 2,
+  }),
 });
 
 const AXE_SLAM = card({

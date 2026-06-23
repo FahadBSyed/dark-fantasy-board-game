@@ -100,6 +100,7 @@ interface Selection {
   cardIndex: number;
   roll: number;
   placed: boolean; // token has been dragged onto its card
+  followUp: boolean; // this pick triggered the card's fold-out second swing
 }
 
 // player: free turn. enemyMove: hollows walking. placing: drag tokens onto the
@@ -111,6 +112,7 @@ type Phase =
   | "placing"
   | "countdown"
   | "revealing"
+  | "comboRevealing" // fold out & resolve follow-up swings
   | "resetting"
   | "dead";
 
@@ -127,6 +129,8 @@ interface State {
   blocking: boolean; // guard is up during the enemy resolution
   selections: Selection[]; // enemy card picks this turn
   flippedCards: Set<number>; // card indices currently face-up
+  followUpsResolved: Set<number>; // card indices whose fold-out swing resolved
+  swingLevel: number; // 0 = base swings, 1 = follow-up wave
   cardsSlid: boolean; // selected cards have slid forward
   draggingCardIndex: number | null; // card highlighted as the active drop target
   countdownNum: number;
@@ -179,6 +183,8 @@ const state: State = {
   blocking: false,
   selections: [],
   flippedCards: new Set(),
+  followUpsResolved: new Set(),
+  swingLevel: 0,
   cardsSlid: false,
   draggingCardIndex: null,
   countdownNum: 0,
@@ -582,8 +588,18 @@ function renderEnemyDeck(): void {
 
     const awaiting = state.phase === "placing" && hasUnplaced;
     const dropTarget = state.draggingCardIndex === i;
+
+    // A triggered follow-up shows a fold-out segment during the combo wave.
+    const hasFollowUp = picks.some((s) => s.followUp) && !!card.followUp;
+    const folded =
+      hasFollowUp &&
+      (state.phase === "comboRevealing" ||
+        (state.phase === "countdown" && state.swingLevel === 1));
+    const followUpDone = state.followUpsResolved.has(i);
+
     const flippable =
       (state.phase === "revealing" && selected && !flipped) ||
+      (state.phase === "comboRevealing" && hasFollowUp && !followUpDone) ||
       (state.phase === "resetting" && selected && flipped);
 
     const el = document.createElement("div");
@@ -602,6 +618,11 @@ function renderEnemyDeck(): void {
     inner.appendChild(makeCardFront(card));
     el.appendChild(inner);
 
+    // Fold-out follow-up segment: telegraph until resolved, then its diagram.
+    if (folded && card.followUp) {
+      el.appendChild(makeFold(card.followUp, followUpDone));
+    }
+
     // Tokens already placed on this card.
     if (placedPicks.length) {
       const tokens = document.createElement("div");
@@ -611,13 +632,34 @@ function renderEnemyDeck(): void {
     }
 
     if (flippable) {
-      el.addEventListener("click", () =>
-        state.phase === "revealing" ? flipCard(i) : unflipCard(i)
-      );
+      el.addEventListener("click", () => {
+        if (state.phase === "revealing") flipCard(i);
+        else if (state.phase === "comboRevealing") resolveFollowUp(i);
+        else unflipCard(i);
+      });
     }
 
     enemyDeckEl.appendChild(el);
   });
+}
+
+// The fold-out segment for a triggered follow-up: its telegraph while pending,
+// then its attack diagram once resolved.
+function makeFold(followUp: EnemyCard, resolved: boolean): HTMLElement {
+  const fold = document.createElement("div");
+  fold.className = "card-fold" + (resolved ? " open" : "");
+  if (resolved) {
+    const name = document.createElement("div");
+    name.className = "fold-name";
+    name.textContent = followUp.name;
+    fold.append(name, makeDiagram(followUp.diagram, Dir.N, true));
+  } else {
+    const tele = document.createElement("div");
+    tele.className = "fold-telegraph";
+    tele.textContent = `↩ “${followUp.telegraph}”`;
+    fold.appendChild(tele);
+  }
+  return fold;
 }
 
 function tokenChip(id: number): HTMLElement {
@@ -1136,6 +1178,8 @@ function startPlayerTurn(): void {
   state.blocking = false;
   state.selections = [];
   state.flippedCards = new Set();
+  state.followUpsResolved = new Set();
+  state.swingLevel = 0;
   state.cardsSlid = false;
   state.draggingCardIndex = null;
   state.staminaOwed = 0;
@@ -1250,7 +1294,9 @@ function beginEnemyAttack(): void {
     if (valid.length === 0) continue; // nothing in range — can't attack
     const roll = 1 + Math.floor(Math.random() * 10);
     const cardIndex = valid[(roll - 1) % valid.length];
-    selections.push({ enemyId: e.id, roll, cardIndex, placed: false });
+    const card = cards[cardIndex];
+    const followUp = card.followUpOn === "oddRoll" && roll % 2 === 1 && !!card.followUp;
+    selections.push({ enemyId: e.id, roll, cardIndex, placed: false, followUp });
   }
 
   if (selections.length === 0) {
@@ -1267,6 +1313,8 @@ function beginEnemyAttack(): void {
       }
       state.selections = selections;
       state.flippedCards = new Set();
+      state.followUpsResolved = new Set();
+      state.swingLevel = 0;
       state.cardsSlid = false;
       state.phase = "placing";
       log("Place each hollow's token on its card.");
@@ -1304,24 +1352,24 @@ function startCountdown(): void {
       state.countdownNum = 0;
       renderCountdown();
       blare();
-      state.phase = "revealing";
       state.selected = false;
-      log("Flip each card to resolve its attack.");
+      if (state.swingLevel === 0) {
+        state.phase = "revealing";
+        log("Flip each card to resolve its attack.");
+      } else {
+        state.phase = "comboRevealing";
+        log("Fold out the follow-up and resolve it.");
+      }
       render();
     }
   };
   setTimeout(tick, 1000);
 }
 
-// Player clicks a face-down card to flip it and resolve every token on it.
-function flipCard(i: number): void {
-  if (state.phase !== "revealing" || inputLocked()) return;
-  const picks = state.selections.filter((s) => s.cardIndex === i);
-  if (picks.length === 0 || state.flippedCards.has(i)) return;
-
-  const card = deck()[i];
+// Flip/fold a card face-up and resolve the given attack against every listed
+// enemy, then continue. Shared by base swings and follow-up swings.
+function resolveSwing(attack: EnemyCard, picks: Selection[], onDone: () => void): void {
   state.busy = true;
-  state.flippedCards.add(i);
   render();
 
   setTimeout(() => {
@@ -1330,7 +1378,7 @@ function flipCard(i: number): void {
       .filter((e): e is EnemyToken => e != null)
       .map((enemy) => ({
         enemy,
-        targets: squaresForOffsets(card.pattern, enemy.pos, enemy.facing).filter(
+        targets: squaresForOffsets(attack.pattern, enemy.pos, enemy.facing).filter(
           (c) => inBounds(c, WIDTH, HEIGHT)
         ),
       }));
@@ -1349,16 +1397,16 @@ function flipCard(i: number): void {
             state.blocking &&
             (guard.some((g) => sameCoord(g, p.enemy.pos)) ||
               p.targets.some((t) => guard.some((g) => sameCoord(g, t))));
-          applyEnemyHit(card, p.enemy, blocked);
+          applyEnemyHit(attack, p.enemy, blocked);
           hitPlayer = true;
         } else {
-          log(`Hollow #${p.enemy.id}'s ${card.name} misses.`);
+          log(`Hollow #${p.enemy.id}'s ${attack.name} misses.`);
         }
       }
 
       const finish = () => {
         state.busy = false;
-        afterFlip();
+        onDone();
       };
 
       if (hitPlayer) {
@@ -1376,21 +1424,72 @@ function flipCard(i: number): void {
   }, CARD_FLIP_MS);
 }
 
-// After a card resolves: check for death, then for all cards revealed.
+// Player clicks a face-down card to flip it and resolve every base swing on it.
+function flipCard(i: number): void {
+  if (state.phase !== "revealing" || inputLocked()) return;
+  const picks = state.selections.filter((s) => s.cardIndex === i);
+  if (picks.length === 0 || state.flippedCards.has(i)) return;
+  state.flippedCards.add(i);
+  resolveSwing(deck()[i], picks, afterFlip);
+}
+
+// Player folds out a triggered card to resolve its follow-up swing.
+function resolveFollowUp(i: number): void {
+  if (state.phase !== "comboRevealing" || inputLocked()) return;
+  const picks = state.selections.filter((s) => s.cardIndex === i && s.followUp);
+  const followUp = deck()[i].followUp;
+  if (picks.length === 0 || !followUp || state.followUpsResolved.has(i)) return;
+  state.followUpsResolved.add(i);
+  resolveSwing(followUp, picks, afterFollowUp);
+}
+
+// After a base swing: death check, then advance to the follow-up wave (if any
+// card triggered one) or to reset.
 function afterFlip(): void {
-  if (state.player.hp <= 0) {
-    state.phase = "dead";
-    log("You have died.");
-    flashTurn("YOU DIED");
-    render();
-    return;
-  }
+  if (state.player.hp <= 0) return died();
   const rolled = new Set(state.selections.map((s) => s.cardIndex));
   const allRevealed = [...rolled].every((i) => state.flippedCards.has(i));
   if (allRevealed) {
-    state.phase = "resetting";
-    log("All cards revealed — click each to flip it back.");
+    if (state.selections.some((s) => s.followUp)) beginFollowUpWave();
+    else toResetting();
   }
+  render();
+}
+
+// After a follow-up swing: death check, then reset once all folds resolved.
+function afterFollowUp(): void {
+  if (state.player.hp <= 0) return died();
+  const foldCards = new Set(
+    state.selections.filter((s) => s.followUp).map((s) => s.cardIndex)
+  );
+  const allResolved = [...foldCards].every((i) => state.followUpsResolved.has(i));
+  if (allResolved) toResetting();
+  render();
+}
+
+// A second reaction window precedes folding out the follow-up swings.
+function beginFollowUpWave(): void {
+  state.swingLevel = 1;
+  state.repositioned = false;
+  state.selected = true;
+  state.phase = "countdown";
+  flashTurn("Follow-up!");
+  log("The hollow winds up again — react!");
+  renderCountdown();
+  render();
+  startCountdown();
+}
+
+function toResetting(): void {
+  state.phase = "resetting";
+  log("Click each card to flip it back.");
+}
+
+function died(): void {
+  state.busy = false;
+  state.phase = "dead";
+  log("You have died.");
+  flashTurn("YOU DIED");
   render();
 }
 
