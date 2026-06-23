@@ -16,6 +16,8 @@ export interface EnemyCard {
   damage: number;
   staminaDamage?: number; // stamina lost on hit
   knockback?: number; // squares the player is shoved away on hit
+  stun?: boolean; // hitting forces a stun roll on the player
+  tags?: string[]; // 3+ tags the player must call to parry this attack
   // A second swing (the card's fold-out segment). It resolves in a follow-up
   // reaction wave when followUpOn is satisfied by the d10 that picked the card.
   followUp?: EnemyCard;
@@ -25,6 +27,8 @@ export interface EnemyCard {
 export interface EnemyTemplate {
   name: string;
   maxHp: number;
+  stunResist: number; // d10 under this = stunned
+  backstabImmune?: boolean;
   deck: EnemyCard[]; // up to 10 cards
 }
 
@@ -36,6 +40,7 @@ const AXE_CUT = card({
   name: "Axe Cut",
   telegraph: "axe from your left",
   range: 1,
+  tags: ["axe", "low", "sweep"],
   diagram: `
 XXX
 -^-`,
@@ -65,6 +70,8 @@ const AXE_SLAM = card({
   name: "Axe Slam",
   telegraph: "overhead",
   range: 2,
+  tags: ["axe", "high", "overhead"],
+  stun: true,
   diagram: `
 -X-
 -X-
@@ -76,6 +83,7 @@ const KICK = card({
   name: "Kick",
   telegraph: "knee up",
   range: 1,
+  tags: ["foot", "fast", "bash"],
   diagram: `
 -X-
 -^-`,
@@ -87,5 +95,6 @@ const KICK = card({
 export const HOLLOW_AXEMAN: EnemyTemplate = {
   name: "Hollow Axeman",
   maxHp: 3,
+  stunResist: 5,
   deck: [AXE_CUT, AXE_SLAM, KICK],
 };

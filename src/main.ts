@@ -20,8 +20,10 @@ import {
   type Coord,
 } from "./grid";
 import {
-  STRAIGHT_SWORD,
-  KITE_SHIELD,
+  WEAPONS,
+  SHIELDS,
+  THIEFS_KNIFE,
+  BUCKLER,
   type Attack,
   type Shield,
   type Weapon,
@@ -60,10 +62,12 @@ function makeTokenSvg(facing: Dir, kind: TokenKind): SVGSVGElement {
 
 const WIDTH = 10;
 const HEIGHT = 10;
-const MOVES_PER_TURN = 5;
+const MOVES_PER_TURN = 3; // free squares; further squares sprint at 1 stamina each
 const MAX_STAMINA = 5;
 const STAMINA_REGEN = 2;
 const MAX_HP = 5;
+const MAX_LOAD = 8; // equip load; under half (< 4) lets you dodge 2 squares
+const PLAYER_STUN_RESIST = 4;
 const ENEMY_MOVES_PER_TURN = 3;
 const ENEMY_STEP_MS = 240;
 const CARD_SLIDE_MS = 360;
@@ -71,7 +75,6 @@ const CARD_FLIP_MS = 520; // matches the card-inner flip transition
 const FLASH_MS = 260;
 const ENGAGE_RANGE = 2; // a hollow must be within this to attack
 const COUNTDOWN_SECONDS = 5;
-const REACT_MAX_SQUARES = 2; // max squares the player may move while reacting
 const REACT_COST = 1; // stamina per square moved while reacting
 
 interface PlayerToken {
@@ -81,6 +84,8 @@ interface PlayerToken {
   maxHp: number;
   stamina: number;
   maxStamina: number;
+  stunResist: number;
+  stunned: boolean; // next turn: no attack and one fewer move
   weapon: Weapon;
   shield: Shield;
 }
@@ -91,6 +96,7 @@ interface EnemyToken {
   facing: Dir;
   hp: number;
   maxHp: number;
+  stunned: boolean; // skips its next attack and moves one fewer square
   template: EnemyTemplate;
 }
 
@@ -121,7 +127,6 @@ interface State {
   enemies: EnemyToken[];
   phase: Phase;
   movesLeft: number;
-  attacksUsed: number;
   selected: boolean;
   busy: boolean;
   stagedAttack: Attack | null;
@@ -157,6 +162,7 @@ function spawnEnemies(): EnemyToken[] {
     facing: Dir.S,
     hp: HOLLOW_AXEMAN.maxHp,
     maxHp: HOLLOW_AXEMAN.maxHp,
+    stunned: false,
     template: HOLLOW_AXEMAN,
   }));
 }
@@ -169,13 +175,14 @@ const state: State = {
     maxHp: MAX_HP,
     stamina: MAX_STAMINA,
     maxStamina: MAX_STAMINA,
-    weapon: STRAIGHT_SWORD,
-    shield: KITE_SHIELD,
+    stunResist: PLAYER_STUN_RESIST,
+    stunned: false,
+    weapon: THIEFS_KNIFE, // overwritten by the loadout screen
+    shield: BUCKLER,
   },
   enemies: spawnEnemies(),
   phase: "player",
   movesLeft: MOVES_PER_TURN,
-  attacksUsed: 0,
   selected: false,
   busy: false,
   stagedAttack: null,
@@ -233,9 +240,18 @@ function occupied(c: Coord, exceptId?: number): boolean {
 // While reacting, the cells reachable by a path of unoccupied squares, mapped
 // to the number of steps (= stamina cost) to get there. Limited to 2 squares
 // and to what stamina allows; you can't move through an enemy.
+function equipLoad(): number {
+  return state.player.weapon.weight + state.player.shield.weight;
+}
+
+// Light loadout (under half the equip load) lets you dodge two squares.
+function dodgeSquares(): number {
+  return equipLoad() < MAX_LOAD / 2 ? 2 : 1;
+}
+
 function reactReach(): Map<string, number> {
   const out = new Map<string, number>();
-  const maxSteps = Math.min(REACT_MAX_SQUARES, Math.floor(staminaAvailable() / REACT_COST));
+  const maxSteps = Math.min(dodgeSquares(), Math.floor(staminaAvailable() / REACT_COST));
   if (maxSteps <= 0) return out;
 
   const visited = new Set<string>([key(state.player.pos)]);
@@ -266,10 +282,12 @@ function reachable(): Set<string> {
   const free = (c: Coord) => inBounds(c, WIDTH, HEIGHT) && !occupied(c);
 
   if (state.phase === "player" && !state.busy && state.selected) {
+    // Free squares plus sprint squares paid for out of stamina.
+    const reach = state.movesLeft + staminaAvailable();
     for (let y = 0; y < HEIGHT; y++) {
       for (let x = 0; x < WIDTH; x++) {
         const c = { x, y };
-        if (free(c) && chebyshev(player.pos, c) <= state.movesLeft) out.add(key(c));
+        if (free(c) && chebyshev(player.pos, c) <= reach) out.add(key(c));
       }
     }
   } else if (state.phase === "countdown" && !inputLocked() && !state.repositioned) {
@@ -824,11 +842,10 @@ function renderWeapon(): void {
   const attacks = document.createElement("div");
   attacks.className = "weapon-card-attacks";
 
-  for (const atk of weapon.attacks) {
+  for (const atk of [weapon.light, weapon.heavy]) {
     const affordable = state.player.stamina >= atk.staminaCost;
-    const hasUses = state.attacksUsed < atk.usesPerTurn;
     const usable =
-      state.phase === "player" && !state.busy && affordable && hasUses;
+      state.phase === "player" && !inputLocked() && affordable && !state.player.stunned;
     const staged = state.stagedAttack === atk;
 
     const opt = document.createElement("div");
@@ -845,8 +862,8 @@ function renderWeapon(): void {
 
     const stats = document.createElement("div");
     stats.className = "attack-stats";
-    const repeat = atk.usesPerTurn > 1 ? ` · ×${atk.usesPerTurn}/turn` : "";
-    stats.textContent = `${atk.damage} dmg · ${atk.staminaCost} stam${repeat}`;
+    const fx = atk.stun ? " · stun" : "";
+    stats.textContent = `${atk.damage} dmg · ${atk.staminaCost} stam${fx}`;
     head.appendChild(stats);
     opt.appendChild(head);
 
@@ -1085,13 +1102,22 @@ function moveTo(dest: Coord): void {
   if (state.busy || !reachable().has(key(dest))) return;
 
   if (state.phase === "player") {
-    const cost = chebyshev(state.player.pos, dest);
-    state.player.pos = dest;
-    state.movesLeft -= cost;
-    state.selected = false;
-    log(`Moved to ${dest.x}, ${dest.y} (−${cost}).`);
-    if (state.movesLeft === 0) log("Out of moves.");
-    render();
+    const dist = chebyshev(state.player.pos, dest);
+    const freeUsed = Math.min(dist, state.movesLeft);
+    const sprint = dist - freeUsed; // extra squares paid 1 stamina each
+    const applyMove = () => {
+      state.player.pos = dest;
+      state.movesLeft -= freeUsed;
+      state.selected = false;
+      log(
+        `Moved to ${dest.x}, ${dest.y} (−${freeUsed} move${
+          sprint ? `, sprint −${sprint} stamina` : ""
+        }).`
+      );
+      render();
+    };
+    if (sprint > 0) requireStamina("spend", sprint, applyMove);
+    else applyMove();
   } else if (state.phase === "countdown") {
     const cost = reactReach().get(key(dest)) ?? 0;
     if (cost <= 0) return;
@@ -1115,7 +1141,7 @@ function rotate(left: boolean): void {
 }
 
 function toggleStage(atk: Attack): void {
-  if (state.phase !== "player" || inputLocked()) return;
+  if (state.phase !== "player" || inputLocked() || state.player.stunned) return;
   state.stagedAttack = state.stagedAttack === atk ? null : atk;
   if (state.stagedAttack) state.stagedBlock = false; // one action per turn
   render();
@@ -1131,11 +1157,30 @@ function toggleBlock(): void {
 
 // --- Player attack (staged on End turn) ---
 
+// The player backstabs a foe when standing on the square directly behind it.
+function isBackstab(e: EnemyToken): boolean {
+  if (e.template.backstabImmune) return false;
+  const fwd = step(e.facing);
+  const behind = { x: e.pos.x - fwd.x, y: e.pos.y - fwd.y };
+  return sameCoord(state.player.pos, behind);
+}
+
+function rollStun(e: EnemyToken): boolean {
+  const roll = 1 + Math.floor(Math.random() * 10);
+  const stunned = roll < e.template.stunResist;
+  log(
+    `Stun roll ${roll} vs #${e.id}'s resist ${e.template.stunResist} → ${
+      stunned ? "stunned!" : "resisted"
+    }`
+  );
+  return stunned;
+}
+
 function performAttack(atk: Attack, onDone: () => void): void {
   const targets = targetSquares(atk).filter((c) => inBounds(c, WIDTH, HEIGHT));
   state.busy = true;
   state.selected = false;
-  log(`You strike — ${atk.name}. (−${atk.staminaCost} stamina)`);
+  log(`You strike — ${atk.name}.`);
   render();
 
   for (const t of targets) cellEls.get(key(t))?.classList.add("flash-target");
@@ -1155,16 +1200,52 @@ function performAttack(atk: Attack, onDone: () => void): void {
     for (const e of hits) cellEls.get(key(e.pos))?.classList.add("flash-hit");
     setTimeout(() => {
       for (const e of hits) cellEls.get(key(e.pos))?.classList.remove("flash-hit");
+
+      const stunnedSurvivors: EnemyToken[] = [];
       for (const e of hits) {
-        e.hp -= atk.damage;
-        if (e.hp <= 0) log(`Hollow #${e.id} is cut down.`);
-        else log(`Hollow #${e.id} takes ${atk.damage}. (${e.hp} HP left)`);
+        const back = isBackstab(e);
+        const dmg = back ? state.player.weapon.backstab : atk.damage;
+        e.hp -= dmg;
+        if (e.hp <= 0) {
+          log(`${back ? "Backstab! " : ""}Hollow #${e.id} is cut down (${dmg}).`);
+        } else {
+          log(`${back ? "Backstab! " : ""}Hollow #${e.id} takes ${dmg}. (${e.hp} HP left)`);
+          if (atk.stun && rollStun(e)) {
+            e.stunned = true;
+            stunnedSurvivors.push(e);
+          }
+        }
       }
       state.enemies = state.enemies.filter((e) => e.hp > 0);
-      state.busy = false;
       render();
-      onDone();
+
+      // A stun can chain into the weapon's follow-through.
+      if (atk.comboOnStun && stunnedSurvivors.some((e) => state.enemies.includes(e))) {
+        log(`Stunned — follow-up ${atk.comboOnStun.name}!`);
+        setTimeout(() => performComboStrike(atk.comboOnStun!, onDone), FLASH_MS);
+      } else {
+        state.busy = false;
+        onDone();
+      }
     }, FLASH_MS);
+  }, FLASH_MS);
+}
+
+// A bonus strike from a stun-combo (no extra stamina in this prototype).
+function performComboStrike(combo: Attack, onDone: () => void): void {
+  const targets = targetSquares(combo).filter((c) => inBounds(c, WIDTH, HEIGHT));
+  for (const t of targets) cellEls.get(key(t))?.classList.add("flash-target");
+  setTimeout(() => {
+    for (const t of targets) cellEls.get(key(t))?.classList.remove("flash-target");
+    const hits = state.enemies.filter((e) => targets.some((t) => sameCoord(t, e.pos)));
+    for (const e of hits) {
+      e.hp -= combo.damage;
+      log(`${combo.name} hits #${e.id} for ${combo.damage}.`);
+    }
+    state.enemies = state.enemies.filter((e) => e.hp > 0);
+    state.busy = false;
+    render();
+    onDone();
   }, FLASH_MS);
 }
 
@@ -1172,8 +1253,9 @@ function performAttack(atk: Attack, onDone: () => void): void {
 
 function startPlayerTurn(): void {
   state.phase = "player";
-  state.movesLeft = MOVES_PER_TURN;
-  state.attacksUsed = 0;
+  // A stun costs one square of movement (and bars attacking) this turn.
+  state.movesLeft = MOVES_PER_TURN - (state.player.stunned ? 1 : 0);
+  for (const e of state.enemies) e.stunned = false; // stun lasted one enemy turn
   state.stagedBlock = false;
   state.blocking = false;
   state.selections = [];
@@ -1184,8 +1266,9 @@ function startPlayerTurn(): void {
   state.draggingCardIndex = null;
   state.staminaOwed = 0;
   state.countdownNum = 0;
+  if (state.player.stunned) log("You are stunned — no attack, reduced movement.");
   log("— Your turn —");
-  flashTurn("Your turn");
+  flashTurn(state.player.stunned ? "Stunned" : "Your turn");
   renderCountdown();
   render();
   // Replenish: drag up to STAMINA_REGEN tokens from the zone back to the pile.
@@ -1196,6 +1279,7 @@ function endTurn(): void {
   if (state.phase !== "player" || inputLocked()) return;
   resumeAudio();
   state.selected = false;
+  state.player.stunned = false; // the stun penalty applied to this turn
 
   // Commit the guard stance (if staged) for the coming enemy resolution.
   state.blocking = state.stagedBlock;
@@ -1203,17 +1287,11 @@ function endTurn(): void {
 
   const atk = state.stagedAttack;
   state.stagedAttack = null;
-  const canAttack =
-    atk != null &&
-    state.attacksUsed < atk.usesPerTurn &&
-    state.player.stamina >= atk.staminaCost;
+  const canAttack = atk != null && state.player.stamina >= atk.staminaCost;
 
   if (atk && canAttack) {
-    // Pay the attack's stamina by dragging, then resolve it.
-    requireStamina("spend", atk.staminaCost, () => {
-      state.attacksUsed += 1;
-      performAttack(atk, beginEnemyPhase);
-    });
+    // Pay the attack's stamina by dragging, then resolve it (ends the turn).
+    requireStamina("spend", atk.staminaCost, () => performAttack(atk, beginEnemyPhase));
   } else {
     beginEnemyPhase();
   }
@@ -1257,8 +1335,9 @@ function moveEnemy(enemy: EnemyToken, stepsTaken: number, done: () => void): voi
   const adjacent = chebyshev(enemy.pos, player.pos) <= 1;
   const nextCell = { x: enemy.pos.x + Math.sign(dx), y: enemy.pos.y + Math.sign(dy) };
   const blocked = !inBounds(nextCell, WIDTH, HEIGHT) || occupied(nextCell, enemy.id);
+  const moveBudget = ENEMY_MOVES_PER_TURN - (enemy.stunned ? 1 : 0); // stun slows
 
-  if (stepsTaken >= ENEMY_MOVES_PER_TURN || adjacent || facing === null || blocked) {
+  if (stepsTaken >= moveBudget || adjacent || facing === null || blocked) {
     render();
     done();
     return;
@@ -1274,7 +1353,7 @@ function moveEnemy(enemy: EnemyToken, stepsTaken: number, done: () => void): voi
 function beginEnemyAttack(): void {
   const cards = deck();
   const attackers = state.enemies.filter(
-    (e) => chebyshev(e.pos, state.player.pos) <= ENGAGE_RANGE
+    (e) => !e.stunned && chebyshev(e.pos, state.player.pos) <= ENGAGE_RANGE
   );
   if (attackers.length === 0 || cards.length === 0) {
     if (state.enemies.length) log("The hollows close in, still out of reach.");
@@ -1548,6 +1627,17 @@ function applyEnemyHit(card: EnemyCard, enemy: EnemyToken, blocked: boolean): vo
     msg += " You are knocked back.";
   }
   log(msg);
+
+  // A stunning attack that connects rolls against the player's resistance.
+  if (card.stun) {
+    const roll = 1 + Math.floor(Math.random() * 10);
+    if (roll < player.stunResist) {
+      player.stunned = true;
+      log(`Stun roll ${roll} vs your resist ${player.stunResist} → you are stunned!`);
+    } else {
+      log(`Stun roll ${roll} vs your resist ${player.stunResist} → you shrug it off.`);
+    }
+  }
 }
 
 function flashTurn(text: string): void {
@@ -1573,5 +1663,77 @@ window.addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 
+// --- Loadout selection ---
+
+const loadoutEl = document.getElementById("loadout")!;
+const weaponChoicesEl = document.getElementById("weapon-choices")!;
+const shieldChoicesEl = document.getElementById("shield-choices")!;
+const loadEl = document.getElementById("loadout-load")!;
+const beginBtn = document.getElementById("begin") as HTMLButtonElement;
+
+let pickedWeapon: Weapon | null = null;
+let pickedShield: Shield | null = null;
+
+function renderLoadout(): void {
+  weaponChoicesEl.replaceChildren();
+  shieldChoicesEl.replaceChildren();
+
+  for (const w of WEAPONS) {
+    const el = document.createElement("div");
+    el.className = "choice" + (pickedWeapon === w ? " picked" : "");
+    el.innerHTML = `
+      <div class="choice-name">${w.name}</div>
+      <div class="choice-stats">${w.weight} wt · backstab ${w.backstab}</div>
+      <div class="choice-stats">${w.light.name}: ${w.light.damage}/${w.light.staminaCost}${
+      w.light.stun ? " stun" : ""
+    }</div>
+      <div class="choice-stats">${w.heavy.name}: ${w.heavy.damage}/${w.heavy.staminaCost}${
+      w.heavy.stun ? " stun" : ""
+    }</div>`;
+    el.addEventListener("click", () => {
+      pickedWeapon = w;
+      refreshLoadout();
+    });
+    weaponChoicesEl.appendChild(el);
+  }
+
+  for (const s of SHIELDS) {
+    const el = document.createElement("div");
+    el.className = "choice" + (pickedShield === s ? " picked" : "");
+    const rule = s.parry === "any2" ? "any 2 tags" : "all tags, in order";
+    el.innerHTML = `
+      <div class="choice-name">${s.name}</div>
+      <div class="choice-stats">${s.weight} wt</div>
+      <div class="choice-stats">parry: ${rule}</div>`;
+    el.addEventListener("click", () => {
+      pickedShield = s;
+      refreshLoadout();
+    });
+    shieldChoicesEl.appendChild(el);
+  }
+}
+
+function refreshLoadout(): void {
+  renderLoadout();
+  const load = (pickedWeapon?.weight ?? 0) + (pickedShield?.weight ?? 0);
+  if (pickedWeapon && pickedShield) {
+    const dodge = load < MAX_LOAD / 2 ? 2 : 1;
+    loadEl.textContent = `Load ${load}/${MAX_LOAD} — dodge ${dodge} square${dodge > 1 ? "s" : ""}`;
+  } else {
+    loadEl.textContent = "";
+  }
+  beginBtn.disabled = !(pickedWeapon && pickedShield);
+}
+
+beginBtn.addEventListener("click", () => {
+  if (!pickedWeapon || !pickedShield) return;
+  state.player.weapon = pickedWeapon;
+  state.player.shield = pickedShield;
+  loadoutEl.classList.add("hidden");
+  render();
+  flashTurn("Your turn");
+});
+
+renderLoadout();
+refreshLoadout();
 render();
-flashTurn("Your turn");

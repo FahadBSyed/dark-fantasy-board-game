@@ -1,84 +1,147 @@
-// Player weapon cards and their attacks.
-//
-// Attacks are authored as ASCII diagrams (see parsePattern) assuming the
-// attacker faces North: 'X' is a targeted square, '^' is the attacker.
-// This file is a tuning surface — adjust damage, stamina, and patterns here.
+// Player armaments — weapons and shields. Patterns are authored as ASCII
+// diagrams facing North ('X' = struck square, 'O' = guarded square, '^' = the
+// wielder). This file is the tuning surface for the player's kit.
 
 import { parsePattern, type Offset } from "./grid";
 
 export interface Attack {
   name: string;
-  diagram: string; // authored facing North; drives the actual pattern
-  diagonalDiagram?: string; // illustration only: the same attack facing NE
+  diagram: string;
+  diagonalDiagram?: string;
   pattern: Offset[];
   damage: number;
   staminaCost: number;
-  // How many times this attack may be used in a single player turn. Defaults
-  // to 1 (the standard one-attack-per-turn rule); repeatable attacks raise it.
-  usesPerTurn: number;
+  stun?: boolean; // hitting forces a stun roll on the target
+  comboOnStun?: Attack; // bonus follow-up if this attack stuns
 }
 
 export interface Weapon {
   name: string;
-  attacks: Attack[];
+  weight: number; // equip-load units
+  light: Attack;
+  heavy: Attack;
+  backstab: number; // damage when striking a foe from directly behind
 }
 
 export interface Shield {
   name: string;
+  weight: number;
   diagram: string; // guarded squares, facing North
-  diagonalDiagram?: string; // illustration facing NE
+  diagonalDiagram?: string;
   pattern: Offset[];
+  // Parry matching rule for the spoken/typed attack tags:
+  // "exactAll" = all tags, in order; "any2" = at least 2 tags, any order.
+  parry: "exactAll" | "any2";
 }
 
-function attack(
-  name: string,
-  diagram: string,
-  damage: number,
-  staminaCost: number,
-  usesPerTurn = 1,
-  diagonalDiagram?: string
-): Attack {
-  return {
-    name,
-    diagram,
-    diagonalDiagram,
-    pattern: parsePattern(diagram),
-    damage,
-    staminaCost,
-    usesPerTurn,
-  };
+function attack(a: Omit<Attack, "pattern">): Attack {
+  return { ...a, pattern: parsePattern(a.diagram) };
 }
 
-const SLASH = `
-xxx
--^-
----`;
+function shield(s: Omit<Shield, "pattern">): Shield {
+  return { ...s, pattern: parsePattern(s.diagram) };
+}
 
-// How the same Slash lands when the attacker faces north-east (illustrative).
-const SLASH_DIAGONAL = `
--XX
--^X
----`;
+// --- Weapons ---
+
+export const THIEFS_KNIFE: Weapon = {
+  name: "Thief's Knife",
+  weight: 1,
+  backstab: 8,
+  light: attack({
+    name: "Stab",
+    damage: 1,
+    staminaCost: 1,
+    diagram: `
+-X-
+-^-`,
+    diagonalDiagram: `
+-X
+^-`,
+  }),
+  heavy: attack({
+    name: "Rake",
+    damage: 2,
+    staminaCost: 2,
+    stun: true,
+    diagram: `
+XXX
+-^-`,
+    diagonalDiagram: `
+XX
+^X`,
+  }),
+};
 
 export const STRAIGHT_SWORD: Weapon = {
   name: "Straight Sword",
-  attacks: [attack("Slash", SLASH, 2, 2, 1, SLASH_DIAGONAL)],
-};
-
-// Guard arc: the three squares directly ahead. An attacker standing in this
-// arc is blocked — its damage hits stamina first, overflow to health.
-const GUARD = `
+  weight: 2,
+  backstab: 4,
+  light: attack({
+    name: "Slash",
+    damage: 2,
+    staminaCost: 2,
+    stun: true,
+    diagram: `
 XXX
--^-`;
-
-const GUARD_DIAGONAL = `
+-^-`,
+    diagonalDiagram: `
 -XX
--^X
----`;
-
-export const KITE_SHIELD: Shield = {
-  name: "Kite Shield",
-  diagram: GUARD,
-  diagonalDiagram: GUARD_DIAGONAL,
-  pattern: parsePattern(GUARD),
+-^X`,
+    // On a stun, the swordsman follows through with a thrust.
+    comboOnStun: attack({
+      name: "Follow Thrust",
+      damage: 2,
+      staminaCost: 2,
+      diagram: `
+X
+^`,
+      diagonalDiagram: `
+-X
+^`,
+    }),
+  }),
+  heavy: attack({
+    name: "Lunge",
+    damage: 3,
+    staminaCost: 3,
+    stun: true,
+    diagram: `
+-X-
+-X-
+-^-`,
+    diagonalDiagram: `
+--X
+-X-
+^--`,
+  }),
 };
+
+// --- Shields ---
+
+export const BUCKLER: Shield = shield({
+  name: "Buckler",
+  weight: 1,
+  parry: "any2",
+  diagram: `
+O
+^`,
+  diagonalDiagram: `
+-O
+^`,
+});
+
+export const KITE_SHIELD: Shield = shield({
+  name: "Kite Shield",
+  weight: 2,
+  parry: "exactAll",
+  diagram: `
+OO-
+O^-`,
+  diagonalDiagram: `
+OO
+^O`,
+});
+
+export const WEAPONS: Weapon[] = [THIEFS_KNIFE, STRAIGHT_SWORD];
+export const SHIELDS: Shield[] = [BUCKLER, KITE_SHIELD];

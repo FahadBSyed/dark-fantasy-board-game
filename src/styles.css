@@ -1172,3 +1172,128 @@ body.locked-scroll {
     opacity: 1;
   }
 }
+
+/* --- Loadout selection screen --- */
+
+#loadout {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: radial-gradient(circle at 50% -10%, #1a1620 0%, var(--bg) 70%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#loadout.hidden {
+  display: none;
+}
+
+.loadout-panel {
+  width: 600px;
+  max-width: 92vw;
+  background: var(--panel);
+  border: 1px solid var(--grid-line);
+  border-radius: 8px;
+  padding: 24px;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+}
+
+.loadout-panel h2 {
+  margin: 0 0 4px;
+  color: var(--ember);
+  letter-spacing: 0.06em;
+}
+
+.loadout-hint {
+  margin: 0 0 18px;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
+.loadout-cols {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+}
+
+.loadout-col {
+  flex: 1;
+}
+
+.loadout-col h3 {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.choice {
+  background: linear-gradient(160deg, #2c2419 0%, #1d1812 100%);
+  border: 2px solid #6a5736;
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.choice:hover {
+  border-color: var(--ember);
+}
+
+.choice.picked {
+  border-color: var(--ember-bright);
+  box-shadow: 0 0 16px rgba(240, 162, 75, 0.55);
+  background: #2a2018;
+}
+
+.choice-name {
+  color: #e6c887;
+  font-size: 1rem;
+  margin-bottom: 4px;
+}
+
+.choice-stats {
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+#loadout-load {
+  margin: 18px 0 14px;
+  color: var(--ember);
+  min-height: 1.2em;
+  font-size: 0.9rem;
+}
+
+#begin {
+  background: #20202a;
+  color: var(--ember);
+  border: 1px solid var(--ember);
+  border-radius: 4px;
+  padding: 10px 28px;
+  font-family: inherit;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+#begin:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--grid-line);
+  color: var(--text-dim);
+}
+
+#begin:not(:disabled):hover {
+  background: var(--ember);
+  color: #15151c;
+}

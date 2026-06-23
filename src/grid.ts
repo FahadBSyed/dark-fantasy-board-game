@@ -135,7 +135,7 @@ export function parsePattern(diagram: string): Offset[] {
   rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
       const ch = row[x].toLowerCase();
-      if (ch === "x") out.push({ dx: x - ox, dy: y - oy });
+      if (ch === "x" || ch === "o") out.push({ dx: x - ox, dy: y - oy });
     }
   });
   return out;

@@ -40,6 +40,25 @@
     <div id="countdown" aria-live="assertive"></div>
     <div id="turn-flash" aria-live="polite"></div>
 
+    <div id="loadout">
+      <div class="loadout-panel">
+        <h2>Choose your loadout</h2>
+        <p class="loadout-hint">Equip load 8 — under half lets you dodge two squares.</p>
+        <div class="loadout-cols">
+          <div class="loadout-col">
+            <h3>Weapon</h3>
+            <div id="weapon-choices" class="choice-list"></div>
+          </div>
+          <div class="loadout-col">
+            <h3>Shield</h3>
+            <div id="shield-choices" class="choice-list"></div>
+          </div>
+        </div>
+        <div id="loadout-load"></div>
+        <button id="begin" type="button" disabled>Begin</button>
+      </div>
+    </div>
+
     <div id="control-dock" role="toolbar" aria-label="combat controls">
       <button id="turn-left" type="button" title="Turn left (Q)" aria-label="Turn left">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
