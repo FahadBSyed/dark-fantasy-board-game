@@ -147,6 +147,9 @@ interface State {
   // Stamina spent during the enemy turn (dodge + block absorption + kick loss),
   // reserved against the pile and paid by dragging after the turn resolves.
   staminaOwed: number;
+  // Combos committed by stunning a foe; they land during the enemy turn after
+  // the other hollows have acted.
+  pendingCombos: { enemyId: number; attack: Attack }[];
   log: string[];
 }
 
@@ -198,6 +201,7 @@ const state: State = {
   repositioned: false,
   staminaGate: null,
   staminaOwed: 0,
+  pendingCombos: [],
   log: ["The Ashen One stands ready. Three hollows stir across the hall."],
 };
 
@@ -1217,32 +1221,63 @@ function performAttack(atk: Attack, onDone: () => void): void {
         }
       }
       state.enemies = state.enemies.filter((e) => e.hp > 0);
-      render();
 
-      // A stun can chain into the weapon's follow-through.
-      if (atk.comboOnStun && stunnedSurvivors.some((e) => state.enemies.includes(e))) {
-        log(`Stunned — follow-up ${atk.comboOnStun.name}!`);
-        setTimeout(() => performComboStrike(atk.comboOnStun!, onDone), FLASH_MS);
-      } else {
-        state.busy = false;
-        onDone();
+      // A stun commits a follow-up that lands during the foe's next turn —
+      // after the other hollows have acted on you.
+      if (atk.comboOnStun) {
+        for (const e of stunnedSurvivors) {
+          if (state.enemies.includes(e)) {
+            state.pendingCombos.push({ enemyId: e.id, attack: atk.comboOnStun });
+            log(`You commit a ${atk.comboOnStun.name} on hollow #${e.id} — it lands next turn.`);
+          }
+        }
       }
+      state.busy = false;
+      render();
+      onDone();
     }, FLASH_MS);
   }, FLASH_MS);
 }
 
-// A bonus strike from a stun-combo (no extra stamina in this prototype).
-function performComboStrike(combo: Attack, onDone: () => void): void {
-  const targets = targetSquares(combo).filter((c) => inBounds(c, WIDTH, HEIGHT));
-  for (const t of targets) cellEls.get(key(t))?.classList.add("flash-target");
-  setTimeout(() => {
-    for (const t of targets) cellEls.get(key(t))?.classList.remove("flash-target");
-    const hits = state.enemies.filter((e) => targets.some((t) => sameCoord(t, e.pos)));
-    for (const e of hits) {
-      e.hp -= combo.damage;
-      log(`${combo.name} hits #${e.id} for ${combo.damage}.`);
+// Resolve every committed combo (on still-living targets) in turn, then onDone.
+function resolvePendingCombos(onDone: () => void): void {
+  const combos = state.pendingCombos.filter((c) =>
+    state.enemies.some((e) => e.id === c.enemyId)
+  );
+  state.pendingCombos = [];
+  let i = 0;
+  const next = () => {
+    if (i >= combos.length || state.player.hp <= 0) {
+      onDone();
+      return;
     }
-    state.enemies = state.enemies.filter((e) => e.hp > 0);
+    resolveComboStrike(combos[i], () => {
+      i += 1;
+      next();
+    });
+  };
+  next();
+}
+
+function resolveComboStrike(
+  combo: { enemyId: number; attack: Attack },
+  onDone: () => void
+): void {
+  const e = state.enemies.find((x) => x.id === combo.enemyId);
+  if (!e) {
+    onDone();
+    return;
+  }
+  state.busy = true;
+  log(`Combo — ${combo.attack.name} lands on stunned hollow #${e.id} for ${combo.attack.damage}.`);
+  render();
+  const el = cellEls.get(key(e.pos));
+  el?.classList.add("flash-hit");
+  setTimeout(() => {
+    el?.classList.remove("flash-hit");
+    e.hp -= combo.attack.damage;
+    if (e.hp <= 0) log(`Hollow #${e.id} is cut down by the combo.`);
+    state.enemies = state.enemies.filter((x) => x.hp > 0);
     state.busy = false;
     render();
     onDone();
@@ -1265,6 +1300,7 @@ function startPlayerTurn(): void {
   state.cardsSlid = false;
   state.draggingCardIndex = null;
   state.staminaOwed = 0;
+  state.pendingCombos = [];
   state.countdownNum = 0;
   if (state.player.stunned) log("You are stunned — no attack, reduced movement.");
   log("— Your turn —");
@@ -1357,7 +1393,7 @@ function beginEnemyAttack(): void {
   );
   if (attackers.length === 0 || cards.length === 0) {
     if (state.enemies.length) log("The hollows close in, still out of reach.");
-    startPlayerTurn();
+    resolvePendingCombos(startPlayerTurn); // committed combos still land
     return;
   }
 
@@ -1528,11 +1564,12 @@ function afterFlip(): void {
   if (state.player.hp <= 0) return died();
   const rolled = new Set(state.selections.map((s) => s.cardIndex));
   const allRevealed = [...rolled].every((i) => state.flippedCards.has(i));
-  if (allRevealed) {
-    if (state.selections.some((s) => s.followUp)) beginFollowUpWave();
-    else toResetting();
+  if (!allRevealed) {
+    render();
+    return;
   }
-  render();
+  if (state.selections.some((s) => s.followUp)) beginFollowUpWave();
+  else combosThenReset();
 }
 
 // After a follow-up swing: death check, then reset once all folds resolved.
@@ -1542,8 +1579,16 @@ function afterFollowUp(): void {
     state.selections.filter((s) => s.followUp).map((s) => s.cardIndex)
   );
   const allResolved = [...foldCards].every((i) => state.followUpsResolved.has(i));
-  if (allResolved) toResetting();
-  render();
+  if (allResolved) combosThenReset();
+  else render();
+}
+
+// Once the hollows have all acted, the player's committed combos land.
+function combosThenReset(): void {
+  resolvePendingCombos(() => {
+    toResetting();
+    render();
+  });
 }
 
 // A second reaction window precedes folding out the follow-up swings.
