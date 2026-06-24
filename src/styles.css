@@ -1396,3 +1396,25 @@ body.locked-scroll {
 .recover-card {
   width: 170px;
 }
+
+/* --- One-click stamina commit --- */
+
+.stamina-pool.drop-active {
+  cursor: pointer;
+}
+
+.stamina-commit {
+  background: #20202a;
+  color: var(--ember);
+  border: 1px solid var(--ember);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.stamina-commit:hover {
+  background: var(--ember);
+  color: #15151c;
+}

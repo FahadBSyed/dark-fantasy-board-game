@@ -401,8 +401,6 @@ function staminaAvailable(): number {
 
 // --- Stamina pile + spend zone (drag tokens to spend / replenish) ---
 
-let staminaDrag: { dir: "spend" | "replenish"; ghost: HTMLElement } | null = null;
-
 function staminaTokenEl(): HTMLElement {
   const t = document.createElement("span");
   t.className = "stamina-token";
@@ -415,86 +413,46 @@ function renderStamina(): void {
   const gate = state.staminaGate;
 
   staminaPileEl.replaceChildren();
-  for (let i = 0; i < pile; i++) {
-    const t = staminaTokenEl();
-    if (gate?.dir === "spend") {
-      t.classList.add("draggable");
-      t.addEventListener("pointerdown", (e) => startStaminaDrag("spend", e));
-    }
-    staminaPileEl.appendChild(t);
-  }
+  for (let i = 0; i < pile; i++) staminaPileEl.appendChild(staminaTokenEl());
   staminaZoneEl.replaceChildren();
-  for (let i = 0; i < zone; i++) {
-    const t = staminaTokenEl();
-    if (gate?.dir === "replenish") {
-      t.classList.add("draggable");
-      t.addEventListener("pointerdown", (e) => startStaminaDrag("replenish", e));
-    }
-    staminaZoneEl.appendChild(t);
+  for (let i = 0; i < zone; i++) staminaZoneEl.appendChild(staminaTokenEl());
+
+  // The target pool glows and commits the whole gate in one click.
+  const spendActive = gate?.dir === "spend";
+  const replenishActive = gate?.dir === "replenish";
+  staminaZoneEl.classList.toggle("drop-active", spendActive);
+  staminaPileEl.classList.toggle("drop-active", replenishActive);
+  staminaZoneEl.onclick = spendActive ? commitStaminaAll : null;
+  staminaPileEl.onclick = replenishActive ? commitStaminaAll : null;
+
+  staminaPromptEl.replaceChildren();
+  if (gate) {
+    const btn = document.createElement("button");
+    btn.className = "stamina-commit";
+    btn.textContent =
+      gate.dir === "spend" ? `Spend ${gate.remaining} →` : `← Recover ${gate.remaining}`;
+    btn.addEventListener("click", commitStaminaAll);
+    staminaPromptEl.appendChild(btn);
   }
-
-  staminaPileEl.classList.toggle("drop-active", gate?.dir === "replenish");
-  staminaZoneEl.classList.toggle("drop-active", gate?.dir === "spend");
-  staminaPromptEl.textContent = gate
-    ? gate.dir === "spend"
-      ? `Drag ${gate.remaining} to the spend zone`
-      : `Drag ${gate.remaining} back to your pile`
-    : "";
 }
 
-function startStaminaDrag(dir: "spend" | "replenish", e: PointerEvent): void {
-  if (state.staminaGate?.dir !== dir) return;
-  e.preventDefault();
-  const ghost = staminaTokenEl();
-  ghost.classList.add("stamina-ghost");
-  document.body.appendChild(ghost);
-  staminaDrag = { dir, ghost };
-  moveStaminaGhost(e);
-  window.addEventListener("pointermove", moveStaminaGhost);
-  window.addEventListener("pointerup", endStaminaDrag);
-}
-
-function moveStaminaGhost(e: PointerEvent): void {
-  if (!staminaDrag) return;
-  staminaDrag.ghost.style.left = `${e.clientX}px`;
-  staminaDrag.ghost.style.top = `${e.clientY}px`;
-}
-
-function endStaminaDrag(e: PointerEvent): void {
-  window.removeEventListener("pointermove", moveStaminaGhost);
-  window.removeEventListener("pointerup", endStaminaDrag);
-  if (!staminaDrag) return;
-  const dir = staminaDrag.dir;
-  staminaDrag.ghost.remove();
-  staminaDrag = null;
-
-  const targetEl = dir === "spend" ? staminaZoneEl : staminaPileEl;
-  const r = targetEl.getBoundingClientRect();
-  const inside =
-    e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-  if (inside) commitStamina(dir);
-}
-
-function commitStamina(dir: "spend" | "replenish"): void {
+// Move the whole gated amount at once (one click), then continue.
+function commitStaminaAll(): void {
   const gate = state.staminaGate;
-  if (!gate || gate.dir !== dir) return;
-  if (dir === "spend") {
-    if (state.player.stamina <= 0) return;
-    state.player.stamina -= 1;
+  if (!gate) return;
+  if (gate.dir === "spend") {
+    state.player.stamina = Math.max(0, state.player.stamina - gate.remaining);
   } else {
-    if (state.player.stamina >= state.player.maxStamina) return;
-    state.player.stamina += 1;
+    state.player.stamina = Math.min(
+      state.player.maxStamina,
+      state.player.stamina + gate.remaining
+    );
   }
-  gate.remaining -= 1;
-  if (gate.remaining <= 0) {
-    state.staminaGate = null;
-    const cb = gateOnDone;
-    gateOnDone = null;
-    render();
-    cb?.();
-  } else {
-    render();
-  }
+  state.staminaGate = null;
+  const cb = gateOnDone;
+  gateOnDone = null;
+  render();
+  cb?.();
 }
 
 let gateOnDone: (() => void) | null = null;
