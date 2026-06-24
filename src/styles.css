@@ -602,9 +602,11 @@ body.locked-scroll {
 #enemy-deck {
   display: flex;
   justify-content: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-bottom: 14px;
   min-height: 150px;
+  max-width: 620px;
 }
 
 .enemy-card {
@@ -1372,4 +1374,19 @@ body.locked-scroll {
 .parry-form input:focus {
   outline: none;
   border-color: var(--ember);
+}
+
+/* --- Enemy base stat block --- */
+
+.stat-block {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 10px;
+  color: #e7b3a0;
+  font-size: 0.9rem;
+}
+
+.stat-block span {
+  white-space: nowrap;
 }

@@ -74,7 +74,6 @@ const STAMINA_REGEN = 2;
 const MAX_HP = 5;
 const MAX_LOAD = 8; // equip load; under half (< 4) lets you dodge 2 squares
 const PLAYER_STUN_RESIST = 4;
-const ENEMY_MOVES_PER_TURN = 3;
 const ENEMY_STEP_MS = 240;
 const CARD_SLIDE_MS = 360;
 const CARD_FLIP_MS = 520; // matches the card-inner flip transition
@@ -580,6 +579,17 @@ function renderEnemyStats(): void {
   title.className = "stat-card-title";
   title.textContent = HOLLOW_AXEMAN.name;
   card.appendChild(title);
+
+  // Base stat block (per type): health, move speed, stun threshold, souls.
+  const t = HOLLOW_AXEMAN;
+  const block = document.createElement("div");
+  block.className = "stat-block";
+  block.innerHTML = `
+    <span title="health">❤ ${t.maxHp}</span>
+    <span title="move speed">👟 ${t.moveSpeed}</span>
+    <span title="stun threshold">★ &lt;${t.stunResist}</span>
+    <span title="souls">◆ ${t.soul}</span>`;
+  card.appendChild(block);
 
   const grid = document.createElement("div");
   grid.className = "stat-grid";
@@ -1517,7 +1527,7 @@ function moveEnemy(enemy: EnemyToken, stepsTaken: number, done: () => void): voi
   const adjacent = chebyshev(enemy.pos, player.pos) <= 1;
   const nextCell = { x: enemy.pos.x + Math.sign(dx), y: enemy.pos.y + Math.sign(dy) };
   const blocked = !inBounds(nextCell, WIDTH, HEIGHT) || occupied(nextCell, enemy.id);
-  const moveBudget = ENEMY_MOVES_PER_TURN - (enemy.stunned ? 1 : 0); // stun slows
+  const moveBudget = enemy.template.moveSpeed - (enemy.stunned ? 1 : 0); // stun slows
 
   if (stepsTaken >= moveBudget || adjacent || facing === null || blocked) {
     render();
@@ -1636,15 +1646,38 @@ function resolveSwing(attack: EnemyCard, picks: Selection[], onDone: () => void)
   render();
 
   setTimeout(() => {
-    const plan = picks
+    const actors = picks
       .map((s) => state.enemies.find((e) => e.id === s.enemyId))
-      .filter((e): e is EnemyToken => e != null)
-      .map((enemy) => ({
-        enemy,
-        targets: squaresForOffsets(attack.pattern, enemy.pos, enemy.facing).filter(
-          (c) => inBounds(c, WIDTH, HEIGHT)
-        ),
-      }));
+      .filter((e): e is EnemyToken => e != null);
+
+    // Pre-attack: leap toward the player and/or turn to face them.
+    let moved = false;
+    for (const enemy of actors) {
+      if (attack.reface) {
+        const f = dirFromDelta(state.player.pos.x - enemy.pos.x, state.player.pos.y - enemy.pos.y);
+        if (f !== null) {
+          enemy.facing = f;
+          moved = true;
+        }
+      }
+      for (let j = 0; j < (attack.jump ?? 0); j++) {
+        const dx = Math.sign(state.player.pos.x - enemy.pos.x);
+        const dy = Math.sign(state.player.pos.y - enemy.pos.y);
+        const next = { x: enemy.pos.x + dx, y: enemy.pos.y + dy };
+        if (chebyshev(enemy.pos, state.player.pos) <= 1) break; // already adjacent
+        if (!inBounds(next, WIDTH, HEIGHT) || occupied(next, enemy.id)) break;
+        enemy.pos = next;
+        moved = true;
+      }
+    }
+    if (moved) render();
+
+    const plan = actors.map((enemy) => ({
+      enemy,
+      targets: squaresForOffsets(attack.pattern, enemy.pos, enemy.facing).filter(
+        (c) => inBounds(c, WIDTH, HEIGHT)
+      ),
+    }));
 
     const allTargets = plan.flatMap((p) => p.targets);
     for (const t of allTargets) cellEls.get(key(t))?.classList.add("flash-target");
