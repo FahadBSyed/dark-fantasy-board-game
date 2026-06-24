@@ -71,6 +71,7 @@ const HEIGHT = 10;
 const MOVES_PER_TURN = 3; // free squares; further squares sprint at 1 stamina each
 const MAX_STAMINA = 5;
 const STAMINA_REGEN = 2;
+const RECOVER_STAMINA = 2; // extra stamina from forgoing your action
 const MAX_HP = 5;
 const MAX_LOAD = 8; // equip load; under half (< 4) lets you dodge 2 squares
 const PLAYER_STUN_RESIST = 4;
@@ -136,6 +137,7 @@ interface State {
   busy: boolean;
   stagedAttack: Attack | null;
   stagedBlock: boolean; // raise guard this turn (instead of attacking)
+  stagedRecover: boolean; // forgo attack/block to recover extra stamina
   blocking: boolean; // guard is up during the enemy resolution
   selections: Selection[]; // enemy card picks this turn
   flippedCards: Set<number>; // card indices currently face-up
@@ -203,6 +205,7 @@ const state: State = {
   busy: false,
   stagedAttack: null,
   stagedBlock: false,
+  stagedRecover: false,
   blocking: false,
   selections: [],
   flippedCards: new Set(),
@@ -381,6 +384,7 @@ function render(): void {
   renderStamina();
   renderWeapon();
   renderShield();
+  renderRecover();
   renderParryPanel();
   renderHud();
 }
@@ -983,6 +987,50 @@ function renderShield(): void {
   weaponEl.appendChild(card);
 }
 
+// A small card to forgo your action and recover extra stamina.
+function renderRecover(): void {
+  const card = document.createElement("div");
+  card.className = "weapon-card recover-card";
+
+  const corner = document.createElement("div");
+  corner.className = "weapon-corner";
+  corner.textContent = "✦";
+  card.appendChild(corner);
+
+  const title = document.createElement("div");
+  title.className = "weapon-card-title";
+  title.textContent = "Rest";
+  card.appendChild(title);
+
+  const usable = state.phase === "player" && !inputLocked();
+  const staged = state.stagedRecover;
+
+  const opt = document.createElement("div");
+  opt.className =
+    "attack-option" + (usable ? "" : " disabled") + (staged ? " staged" : "");
+
+  const head = document.createElement("div");
+  head.className = "attack-text";
+  const name = document.createElement("div");
+  name.className = "attack-name";
+  name.textContent = "Recover";
+  head.appendChild(name);
+  const stats = document.createElement("div");
+  stats.className = "attack-stats";
+  stats.textContent = `+${RECOVER_STAMINA} stamina · no attack/block`;
+  head.appendChild(stats);
+  opt.appendChild(head);
+
+  if (usable || staged) opt.addEventListener("click", toggleRecover);
+
+  const wrap = document.createElement("div");
+  wrap.className = "weapon-card-attacks";
+  wrap.appendChild(opt);
+  card.appendChild(wrap);
+
+  weaponEl.appendChild(card);
+}
+
 function makeShieldArt(): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 64 120");
@@ -1180,14 +1228,30 @@ function rotate(left: boolean): void {
 function toggleStage(atk: Attack): void {
   if (state.phase !== "player" || inputLocked() || state.player.stunned) return;
   state.stagedAttack = state.stagedAttack === atk ? null : atk;
-  if (state.stagedAttack) state.stagedBlock = false; // one action per turn
+  if (state.stagedAttack) {
+    state.stagedBlock = false; // one action per turn
+    state.stagedRecover = false;
+  }
   render();
 }
 
 function toggleBlock(): void {
   if (state.phase !== "player" || inputLocked()) return;
   state.stagedBlock = !state.stagedBlock;
-  if (state.stagedBlock) state.stagedAttack = null;
+  if (state.stagedBlock) {
+    state.stagedAttack = null;
+    state.stagedRecover = false;
+  }
+  render();
+}
+
+function toggleRecover(): void {
+  if (state.phase !== "player" || inputLocked()) return;
+  state.stagedRecover = !state.stagedRecover;
+  if (state.stagedRecover) {
+    state.stagedAttack = null;
+    state.stagedBlock = false;
+  }
   render();
 }
 
@@ -1446,6 +1510,7 @@ function startPlayerTurn(): void {
   state.movesLeft = MOVES_PER_TURN - (state.player.stunned ? 1 : 0);
   for (const e of state.enemies) e.stunned = false; // stun lasted one enemy turn
   state.stagedBlock = false;
+  state.stagedRecover = false;
   state.blocking = false;
   state.selections = [];
   state.flippedCards = new Set();
@@ -1477,6 +1542,9 @@ function endTurn(): void {
   state.blocking = state.stagedBlock;
   state.stagedBlock = false;
 
+  const recover = state.stagedRecover;
+  state.stagedRecover = false;
+
   const atk = state.stagedAttack;
   state.stagedAttack = null;
   const canAttack = atk != null && state.player.stamina >= atk.staminaCost;
@@ -1484,6 +1552,10 @@ function endTurn(): void {
   if (atk && canAttack) {
     // Pay the attack's stamina by dragging, then resolve it (ends the turn).
     requireStamina("spend", atk.staminaCost, () => performAttack(atk, beginEnemyPhase));
+  } else if (recover) {
+    // Forgo acting to pull extra stamina from the spend zone, then end turn.
+    log("You catch your breath.");
+    requireStamina("replenish", RECOVER_STAMINA, beginEnemyPhase);
   } else {
     beginEnemyPhase();
   }

@@ -1390,3 +1390,9 @@ body.locked-scroll {
 .stat-block span {
   white-space: nowrap;
 }
+
+/* --- Recover (Rest) card --- */
+
+.recover-card {
+  width: 170px;
+}
