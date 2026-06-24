@@ -81,7 +81,7 @@ const CARD_FLIP_MS = 520; // matches the card-inner flip transition
 const FLASH_MS = 260;
 const ENGAGE_RANGE = 2; // a hollow must be within this to attack
 const COUNTDOWN_SECONDS = 5;
-const REACT_COST = 1; // stamina per square moved while reacting
+const DODGE_COST = 2; // flat stamina cost to dodge, whether you move 1 or 2
 
 interface PlayerToken {
   pos: Coord;
@@ -275,7 +275,7 @@ function dodgeSquares(): number {
 
 function reactReach(): Map<string, number> {
   const out = new Map<string, number>();
-  const maxSteps = Math.min(dodgeSquares(), Math.floor(staminaAvailable() / REACT_COST));
+  const maxSteps = staminaAvailable() >= DODGE_COST ? dodgeSquares() : 0;
   if (maxSteps <= 0) return out;
 
   const visited = new Set<string>([key(state.player.pos)]);
@@ -1084,7 +1084,7 @@ function canMoveNow(): boolean {
   if (state.phase === "countdown") {
     // Parry and movement are mutually exclusive (parry is only the base wave).
     const parryLock = state.parry !== null && state.swingLevel === 0;
-    return !parryLock && !state.repositioned && staminaAvailable() >= REACT_COST;
+    return !parryLock && !state.repositioned && staminaAvailable() >= DODGE_COST;
   }
   return false;
 }
@@ -1162,15 +1162,15 @@ function moveTo(dest: Coord): void {
     if (sprint > 0) requireStamina("spend", sprint, applyMove);
     else applyMove();
   } else if (state.phase === "countdown") {
-    const cost = reactReach().get(key(dest)) ?? 0;
-    if (cost <= 0) return;
-    state.staminaOwed += cost * REACT_COST;
+    const steps = reactReach().get(key(dest)) ?? 0;
+    if (steps <= 0) return;
+    state.staminaOwed += DODGE_COST; // flat dodge cost, 1 or 2 squares
     state.player.pos = dest;
     state.repositioned = true;
     state.selected = false;
     const dropped = state.blocking ? " Guard dropped." : "";
     state.blocking = false; // moving cancels the block
-    log(`Reacted to ${dest.x}, ${dest.y} (owe ${cost} stamina).${dropped}`);
+    log(`Dodged to ${dest.x}, ${dest.y} (owe ${DODGE_COST} stamina).${dropped}`);
     render();
   }
 }
