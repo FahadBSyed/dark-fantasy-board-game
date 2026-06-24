@@ -1699,12 +1699,23 @@ function resolveSwing(attack: EnemyCard, picks: Selection[], onDone: () => void)
         }
       }
       for (let j = 0; j < (attack.jump ?? 0); j++) {
-        const dx = Math.sign(state.player.pos.x - enemy.pos.x);
-        const dy = Math.sign(state.player.pos.y - enemy.pos.y);
-        const next = { x: enemy.pos.x + dx, y: enemy.pos.y + dy };
-        if (chebyshev(enemy.pos, state.player.pos) <= 1) break; // already adjacent
-        if (!inBounds(next, WIDTH, HEIGHT) || occupied(next, enemy.id)) break;
-        enemy.pos = next;
+        const cur = chebyshev(enemy.pos, state.player.pos);
+        if (cur <= 1) break; // already adjacent — can't leap onto the player
+        // Leap to whichever free neighbour lands closest to the player.
+        let best: Coord | null = null;
+        let bestDist = cur;
+        for (let d = 0; d < 8; d++) {
+          const s = step(d as Dir);
+          const n = { x: enemy.pos.x + s.x, y: enemy.pos.y + s.y };
+          if (!inBounds(n, WIDTH, HEIGHT) || occupied(n, enemy.id)) continue;
+          const dist = chebyshev(n, state.player.pos);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = n;
+          }
+        }
+        if (!best) break;
+        enemy.pos = best;
         moved = true;
       }
     }
