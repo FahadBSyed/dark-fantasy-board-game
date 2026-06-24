@@ -1297,3 +1297,79 @@ body.locked-scroll {
   background: var(--ember);
   color: #15151c;
 }
+
+/* --- Parry --- */
+
+#control-dock #parry.armed {
+  border-color: var(--ember-bright);
+  color: var(--ember-bright);
+  box-shadow: 0 0 14px rgba(240, 162, 75, 0.6);
+}
+
+#parry-panel {
+  position: fixed;
+  top: 30%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 110;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 22px;
+  min-width: 260px;
+  background: rgba(21, 21, 28, 0.96);
+  border: 2px solid var(--ember);
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
+  text-align: center;
+}
+
+#parry-panel.show {
+  display: flex;
+}
+
+#parry-panel.ok {
+  border-color: #6ab06a;
+  box-shadow: 0 0 28px rgba(106, 176, 106, 0.6);
+}
+
+.parry-title {
+  color: var(--ember);
+  font-size: 1.1rem;
+  letter-spacing: 0.06em;
+}
+
+#parry-panel.ok .parry-title {
+  color: #8fd07a;
+}
+
+.parry-tags {
+  color: #e6c887;
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+}
+
+.parry-heard {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-style: italic;
+  min-height: 1.1em;
+}
+
+.parry-form input {
+  background: #15151c;
+  border: 1px solid var(--grid-line);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 6px 10px;
+  width: 220px;
+  text-align: center;
+}
+
+.parry-form input:focus {
+  outline: none;
+  border-color: var(--ember);
+}

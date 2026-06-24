@@ -31,6 +31,12 @@ import {
 import { HOLLOW_AXEMAN, type EnemyCard, type EnemyTemplate } from "./enemies";
 import { beep, blare, resumeAudio } from "./audio";
 import { rollDice } from "./dice";
+import {
+  listenForParry,
+  matchTags,
+  speechSupported,
+  type ParryListener,
+} from "./parry";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -150,6 +156,14 @@ interface State {
   // Combos committed by stunning a foe; they land during the enemy turn after
   // the other hollows have acted.
   pendingCombos: { enemyId: number; attack: Attack }[];
+  // A declared parry during the reaction window.
+  parry: {
+    targetId: number;
+    required: string[];
+    rule: "exactAll" | "any2";
+    success: boolean;
+    transcript: string;
+  } | null;
   log: string[];
 }
 
@@ -202,6 +216,7 @@ const state: State = {
   staminaGate: null,
   staminaOwed: 0,
   pendingCombos: [],
+  parry: null,
   log: ["The Ashen One stands ready. Three hollows stir across the hall."],
 };
 
@@ -219,6 +234,9 @@ const countdownEl = document.getElementById("countdown")!;
 const turnLeftBtn = document.getElementById("turn-left") as HTMLButtonElement;
 const turnRightBtn = document.getElementById("turn-right") as HTMLButtonElement;
 const endBtn = document.getElementById("end-turn") as HTMLButtonElement;
+const parryBtn = document.getElementById("parry") as HTMLButtonElement;
+const parryPanelEl = document.getElementById("parry-panel")!;
+let parryListener: ParryListener | null = null;
 
 const cellEls = new Map<string, HTMLElement>();
 const key = (c: Coord) => `${c.x},${c.y}`;
@@ -364,6 +382,7 @@ function render(): void {
   renderStamina();
   renderWeapon();
   renderShield();
+  renderParryPanel();
   renderHud();
 }
 
@@ -540,6 +559,8 @@ function updateInteractivity(): void {
   turnLeftBtn.disabled = !playerActive;
   turnRightBtn.disabled = !playerActive;
   endBtn.disabled = !playerActive;
+  parryBtn.disabled = !canParry();
+  parryBtn.classList.toggle("armed", state.parry !== null);
   document.body.classList.toggle("locked-scroll", state.phase !== "player");
 }
 
@@ -1045,7 +1066,9 @@ function canMoveNow(): boolean {
   if (inputLocked()) return false;
   if (state.phase === "player") return state.movesLeft > 0;
   if (state.phase === "countdown") {
-    return !state.repositioned && staminaAvailable() >= REACT_COST;
+    // Parry and movement are mutually exclusive (parry is only the base wave).
+    const parryLock = state.parry !== null && state.swingLevel === 0;
+    return !parryLock && !state.repositioned && staminaAvailable() >= REACT_COST;
   }
   return false;
 }
@@ -1158,6 +1181,127 @@ function toggleBlock(): void {
   render();
 }
 
+// --- Parry (reaction window) ---
+
+// The earliest incoming attack (lowest enemy id) that carries parry tags.
+function parryTarget(): { enemyId: number; tags: string[] } | null {
+  const cards = deck();
+  const ordered = [...state.selections].sort((a, b) => a.enemyId - b.enemyId);
+  for (const s of ordered) {
+    const tags = cards[s.cardIndex]?.tags;
+    if (tags && tags.length) return { enemyId: s.enemyId, tags };
+  }
+  return null;
+}
+
+function canParry(): boolean {
+  return (
+    state.phase === "countdown" &&
+    state.swingLevel === 0 &&
+    !inputLocked() &&
+    !state.repositioned &&
+    state.parry === null &&
+    parryTarget() !== null
+  );
+}
+
+// Declare a parry on the earliest attack and start listening for the tags.
+function armParry(): void {
+  if (!canParry()) return;
+  const target = parryTarget();
+  if (!target) return;
+  resumeAudio();
+  state.parry = {
+    targetId: target.enemyId,
+    required: target.tags,
+    rule: state.player.shield.parry,
+    success: false,
+    transcript: "",
+  };
+  log(`Parry declared on hollow #${target.enemyId} — call the tags!`);
+  render();
+
+  if (speechSupported()) {
+    parryListener = listenForParry(
+      target.tags,
+      state.player.shield.parry,
+      (t) => {
+        if (state.parry && !state.parry.success) {
+          state.parry.transcript = t;
+          renderParryPanel();
+        }
+      },
+      parrySucceeded
+    );
+  }
+}
+
+function parrySucceeded(): void {
+  if (!state.parry || state.parry.success) return;
+  state.parry.success = true;
+  stopParryListen();
+  log(`Parried! Hollow #${state.parry.targetId}'s strike is turned aside.`);
+  render();
+}
+
+function submitParryText(text: string): void {
+  if (!state.parry || state.parry.success) return;
+  state.parry.transcript = text;
+  if (matchTags(text, state.parry.required, state.parry.rule)) parrySucceeded();
+  else {
+    log("Not quite — try the tags again.");
+    renderParryPanel();
+  }
+}
+
+function stopParryListen(): void {
+  parryListener?.stop();
+  parryListener = null;
+}
+
+function renderParryPanel(): void {
+  parryPanelEl.replaceChildren();
+  const p = state.parry;
+  if (!p || state.phase !== "countdown") {
+    parryPanelEl.classList.remove("show");
+    return;
+  }
+  parryPanelEl.classList.add("show");
+  parryPanelEl.classList.toggle("ok", p.success);
+
+  const title = document.createElement("div");
+  title.className = "parry-title";
+  title.textContent = p.success ? "PARRIED!" : `Parry #${p.targetId} — call the tags`;
+  parryPanelEl.appendChild(title);
+
+  const tags = document.createElement("div");
+  tags.className = "parry-tags";
+  const ruleHint = p.rule === "any2" ? "any 2" : "all, in order";
+  tags.textContent = `${p.required.join(" · ")}   (${ruleHint})`;
+  parryPanelEl.appendChild(tags);
+
+  if (!p.success) {
+    if (speechSupported()) {
+      const heard = document.createElement("div");
+      heard.className = "parry-heard";
+      heard.textContent = p.transcript ? `🎤 “${p.transcript}”` : "🎤 listening…";
+      parryPanelEl.appendChild(heard);
+    }
+    const form = document.createElement("form");
+    form.className = "parry-form";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "or type the tags";
+    input.autocomplete = "off";
+    form.appendChild(input);
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      submitParryText(input.value);
+      input.value = "";
+    });
+    parryPanelEl.appendChild(form);
+  }
+}
 
 // --- Player attack (staged on End turn) ---
 
@@ -1301,6 +1445,8 @@ function startPlayerTurn(): void {
   state.draggingCardIndex = null;
   state.staminaOwed = 0;
   state.pendingCombos = [];
+  state.parry = null;
+  stopParryListen();
   state.countdownNum = 0;
   if (state.player.stunned) log("You are stunned — no attack, reduced movement.");
   log("— Your turn —");
@@ -1468,6 +1614,8 @@ function startCountdown(): void {
       renderCountdown();
       blare();
       state.selected = false;
+      stopParryListen(); // time's up — lock in whatever the parry achieved
+      if (state.parry && !state.parry.success) log("Parry failed — you brace for the blows.");
       if (state.swingLevel === 0) {
         state.phase = "revealing";
         log("Flip each card to resolve its attack.");
@@ -1504,9 +1652,15 @@ function resolveSwing(attack: EnemyCard, picks: Selection[], onDone: () => void)
     setTimeout(() => {
       for (const t of allTargets) cellEls.get(key(t))?.classList.remove("flash-target");
 
+      // A successful parry turns aside every blow for the rest of the round.
+      const parried = state.parry?.success ?? false;
       let hitPlayer = false;
       for (const p of plan) {
         if (p.targets.some((t) => sameCoord(t, state.player.pos))) {
+          if (parried) {
+            log(`Hollow #${p.enemy.id}'s ${attack.name} is parried — no damage.`);
+            continue;
+          }
           const guard = guardedSquares();
           const blocked =
             state.blocking &&
@@ -1583,12 +1737,44 @@ function afterFollowUp(): void {
   else render();
 }
 
-// Once the hollows have all acted, the player's committed combos land.
+// Once the hollows have all acted: riposte (if parried), then committed combos.
 function combosThenReset(): void {
-  resolvePendingCombos(() => {
-    toResetting();
+  resolveRiposte(() =>
+    resolvePendingCombos(() => {
+      toResetting();
+      render();
+    })
+  );
+}
+
+// A successful parry lets the player riposte the parried foe for backstab
+// damage (auto in this prototype).
+function resolveRiposte(onDone: () => void): void {
+  const p = state.parry;
+  if (!p || !p.success) {
+    onDone();
+    return;
+  }
+  const e = state.enemies.find((x) => x.id === p.targetId);
+  if (!e) {
+    onDone();
+    return;
+  }
+  const dmg = state.player.weapon.backstab;
+  state.busy = true;
+  log(`Riposte! ${dmg} damage to hollow #${e.id}.`);
+  render();
+  const el = cellEls.get(key(e.pos));
+  el?.classList.add("flash-hit");
+  setTimeout(() => {
+    el?.classList.remove("flash-hit");
+    e.hp -= dmg;
+    if (e.hp <= 0) log(`Hollow #${e.id} is cut down by the riposte.`);
+    state.enemies = state.enemies.filter((x) => x.hp > 0);
+    state.busy = false;
     render();
-  });
+    onDone();
+  }, FLASH_MS);
 }
 
 // A second reaction window precedes folding out the follow-up swings.
@@ -1698,12 +1884,16 @@ function flashTurn(text: string): void {
 turnLeftBtn.addEventListener("click", () => rotate(true));
 turnRightBtn.addEventListener("click", () => rotate(false));
 endBtn.addEventListener("click", endTurn);
+parryBtn.addEventListener("click", armParry);
 
 window.addEventListener("keydown", (e) => {
+  // Don't steal keys while typing parry tags.
+  if ((e.target as HTMLElement)?.tagName === "INPUT") return;
   const k = e.key.toLowerCase();
   if (k === "q") rotate(true);
   else if (k === "e") rotate(false);
   else if (k === "enter") endTurn();
+  else if (k === "p") armParry();
   else return;
   e.preventDefault();
 });
