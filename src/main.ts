@@ -1310,14 +1310,17 @@ function renderParryPanel(): void {
 
   const title = document.createElement("div");
   title.className = "parry-title";
-  title.textContent = p.success ? "PARRIED!" : `Parry #${p.targetId} — call the tags`;
+  title.textContent = p.success ? "PARRIED!" : `Parry #${p.targetId} — call the tags!`;
   parryPanelEl.appendChild(title);
 
-  const tags = document.createElement("div");
-  tags.className = "parry-tags";
-  const ruleHint = p.rule === "any2" ? "any 2" : "all, in order";
-  tags.textContent = `${p.required.join(" · ")}   (${ruleHint})`;
-  parryPanelEl.appendChild(tags);
+  // The required tags are NOT shown — the player must recall them from memory.
+  // Only the shield's matching rule (how lenient) is hinted.
+  if (!p.success) {
+    const rule = document.createElement("div");
+    rule.className = "parry-tags";
+    rule.textContent = p.rule === "any2" ? "any 2, any order" : "all 3, in order";
+    parryPanelEl.appendChild(rule);
+  }
 
   if (!p.success) {
     if (speechSupported()) {
@@ -1352,17 +1355,6 @@ function isBackstab(e: EnemyToken): boolean {
   return sameCoord(state.player.pos, behind);
 }
 
-function rollStun(e: EnemyToken): boolean {
-  const roll = 1 + Math.floor(Math.random() * 10);
-  const stunned = roll < e.template.stunResist;
-  log(
-    `Stun roll ${roll} vs #${e.id}'s resist ${e.template.stunResist} → ${
-      stunned ? "stunned!" : "resisted"
-    }`
-  );
-  return stunned;
-}
-
 function performAttack(atk: Attack, onDone: () => void): void {
   const targets = targetSquares(atk).filter((c) => inBounds(c, WIDTH, HEIGHT));
   state.busy = true;
@@ -1388,36 +1380,52 @@ function performAttack(atk: Attack, onDone: () => void): void {
     setTimeout(() => {
       for (const e of hits) cellEls.get(key(e.pos))?.classList.remove("flash-hit");
 
-      const stunnedSurvivors: EnemyToken[] = [];
       for (const e of hits) {
         const back = isBackstab(e);
         const dmg = back ? state.player.weapon.backstab : atk.damage;
         e.hp -= dmg;
-        if (e.hp <= 0) {
-          log(`${back ? "Backstab! " : ""}Hollow #${e.id} is cut down (${dmg}).`);
-        } else {
-          log(`${back ? "Backstab! " : ""}Hollow #${e.id} takes ${dmg}. (${e.hp} HP left)`);
-          if (atk.stun && rollStun(e)) {
-            e.stunned = true;
-            stunnedSurvivors.push(e);
-          }
-        }
+        if (e.hp <= 0) log(`${back ? "Backstab! " : ""}Hollow #${e.id} is cut down (${dmg}).`);
+        else log(`${back ? "Backstab! " : ""}Hollow #${e.id} takes ${dmg}. (${e.hp} HP left)`);
       }
       state.enemies = state.enemies.filter((e) => e.hp > 0);
+      render();
 
-      // A stun commits a follow-up that lands during the foe's next turn —
-      // after the other hollows have acted on you.
-      if (atk.comboOnStun) {
-        for (const e of stunnedSurvivors) {
-          if (state.enemies.includes(e)) {
-            state.pendingCombos.push({ enemyId: e.id, attack: atk.comboOnStun });
-            log(`You commit a ${atk.comboOnStun.name} on hollow #${e.id} — it lands next turn.`);
+      const survivors = hits.filter((e) => state.enemies.includes(e));
+
+      // Commit follow-ups for stunned survivors, then end the strike.
+      const commitCombos = (stunned: EnemyToken[]) => {
+        if (atk.comboOnStun) {
+          for (const e of stunned) {
+            if (state.enemies.includes(e)) {
+              state.pendingCombos.push({ enemyId: e.id, attack: atk.comboOnStun });
+              log(`You commit a ${atk.comboOnStun.name} on hollow #${e.id} — it lands next turn.`);
+            }
           }
         }
+        state.busy = false;
+        render();
+        onDone();
+      };
+
+      // Roll the stun dice (one per struck survivor) before resolving stuns.
+      if (atk.stun && survivors.length) {
+        const rolls = survivors.map(() => 1 + Math.floor(Math.random() * 10));
+        rollDice(rolls, () => {
+          const stunned: EnemyToken[] = [];
+          survivors.forEach((e, i) => {
+            const ok = rolls[i] < e.template.stunResist;
+            log(`Stun ${rolls[i]} vs #${e.id} resist ${e.template.stunResist} → ${ok ? "stunned!" : "resisted"}`);
+            if (ok) {
+              e.stunned = true;
+              stunned.push(e);
+            }
+          });
+          render();
+          commitCombos(stunned);
+        });
+      } else {
+        commitCombos([]);
       }
-      state.busy = false;
-      render();
-      onDone();
     }, FLASH_MS);
   }, FLASH_MS);
 }
@@ -1759,16 +1767,35 @@ function resolveSwing(attack: EnemyCard, picks: Selection[], onDone: () => void)
         onDone();
       };
 
+      // After a stunning attack connects, roll the player's stun die on screen.
+      const stunStep = () => {
+        if (attack.stun && hitPlayer) {
+          const roll = 1 + Math.floor(Math.random() * 10);
+          rollDice([roll], () => {
+            if (roll < state.player.stunResist) {
+              state.player.stunned = true;
+              log(`Stun ${roll} vs your resist ${state.player.stunResist} → you are stunned!`);
+            } else {
+              log(`Stun ${roll} vs your resist ${state.player.stunResist} → you shrug it off.`);
+            }
+            render();
+            finish();
+          });
+        } else {
+          finish();
+        }
+      };
+
       if (hitPlayer) {
         const el = cellEls.get(key(state.player.pos));
         el?.classList.add("flash-hit");
         render();
         setTimeout(() => {
           el?.classList.remove("flash-hit");
-          finish();
+          stunStep();
         }, FLASH_MS);
       } else {
-        finish();
+        stunStep();
       }
     }, FLASH_MS);
   }, CARD_FLIP_MS);
@@ -1939,17 +1966,8 @@ function applyEnemyHit(card: EnemyCard, enemy: EnemyToken, blocked: boolean): vo
     msg += " You are knocked back.";
   }
   log(msg);
-
-  // A stunning attack that connects rolls against the player's resistance.
-  if (card.stun) {
-    const roll = 1 + Math.floor(Math.random() * 10);
-    if (roll < player.stunResist) {
-      player.stunned = true;
-      log(`Stun roll ${roll} vs your resist ${player.stunResist} → you are stunned!`);
-    } else {
-      log(`Stun roll ${roll} vs your resist ${player.stunResist} → you shrug it off.`);
-    }
-  }
+  // The stun roll for a connecting stun attack is rolled (with dice) in
+  // resolveSwing, after all of the card's hits land.
 }
 
 function flashTurn(text: string): void {
