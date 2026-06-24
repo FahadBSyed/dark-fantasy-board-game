@@ -522,7 +522,6 @@ function updateInteractivity(): void {
   endBtn.disabled = !playerActive;
   parryBtn.disabled = !canParry();
   parryBtn.classList.toggle("armed", state.parry !== null);
-  document.body.classList.toggle("locked-scroll", state.phase !== "player");
 }
 
 // --- Enemy stat & brain card (one shared card per enemy type) ---
@@ -1969,6 +1968,83 @@ window.addEventListener("keydown", (e) => {
   else return;
   e.preventDefault();
 });
+
+// --- Movable panes: grab the grip to float an area anywhere (persisted) ---
+
+const PANE_KEY = "dfbg-panes";
+type PanePos = { x: number; y: number };
+
+function loadPanes(): Record<string, PanePos> {
+  try {
+    return JSON.parse(localStorage.getItem(PANE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function savePane(id: string, pos: PanePos | null): void {
+  const all = loadPanes();
+  if (pos) all[id] = pos;
+  else delete all[id];
+  localStorage.setItem(PANE_KEY, JSON.stringify(all));
+}
+
+function floatPane(pane: HTMLElement, pos: PanePos): void {
+  pane.classList.add("floating");
+  pane.style.left = `${pos.x}px`;
+  pane.style.top = `${pos.y}px`;
+}
+
+// Wrap `el` in a draggable pane with a grip header.
+function makePane(el: HTMLElement | null, label: string, id: string): void {
+  if (!el || !el.parentNode) return;
+  const pane = document.createElement("div");
+  pane.className = "pane";
+  el.parentNode.insertBefore(pane, el);
+
+  const grip = document.createElement("div");
+  grip.className = "pane-grip";
+  grip.innerHTML = `<span class="grip-dots">⠿</span><span>${label}</span><span class="grip-hint">drag · 2× reset</span>`;
+  pane.append(grip, el);
+
+  const saved = loadPanes()[id];
+  if (saved) floatPane(pane, saved);
+
+  let offX = 0;
+  let offY = 0;
+  let dragging = false;
+
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const r = pane.getBoundingClientRect();
+    if (!pane.classList.contains("floating")) floatPane(pane, { x: r.left, y: r.top });
+    offX = e.clientX - pane.getBoundingClientRect().left;
+    offY = e.clientY - pane.getBoundingClientRect().top;
+    dragging = true;
+    grip.setPointerCapture(e.pointerId);
+  });
+  grip.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    pane.style.left = `${e.clientX - offX}px`;
+    pane.style.top = `${e.clientY - offY}px`;
+  });
+  grip.addEventListener("pointerup", (e) => {
+    if (!dragging) return;
+    dragging = false;
+    grip.releasePointerCapture(e.pointerId);
+    savePane(id, { x: parseFloat(pane.style.left), y: parseFloat(pane.style.top) });
+  });
+  grip.addEventListener("dblclick", () => {
+    pane.classList.remove("floating");
+    pane.removeAttribute("style");
+    savePane(id, null);
+  });
+}
+
+makePane(document.getElementById("enemy-stats"), "Stat Card", "stats");
+makePane(document.getElementById("enemy-deck"), "Enemy Cards", "deck");
+makePane(document.getElementById("weapon"), "Your Cards", "weapon");
+makePane(document.getElementById("stamina-area"), "Stamina", "stamina");
 
 // --- Loadout selection ---
 
