@@ -1418,3 +1418,14 @@ body.locked-scroll {
   background: var(--ember);
   color: #15151c;
 }
+
+/* Parry tags printed on the card back (readable during the reaction). */
+.card-tags {
+  margin-top: 6px;
+  color: #c79b86;
+  font-size: 0.66rem;
+  letter-spacing: 0.03em;
+  border-top: 1px solid rgba(154, 122, 90, 0.3);
+  padding-top: 5px;
+  text-align: center;
+}

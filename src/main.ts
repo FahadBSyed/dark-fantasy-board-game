@@ -783,6 +783,15 @@ function makeCardBack(card: EnemyCard): HTMLElement {
   range.textContent = `range ${card.range}`;
 
   back.append(tele, range);
+
+  // Parry tags are printed on the back so they can be read (and called)
+  // during the reaction, before the card is flipped.
+  if (card.tags && card.tags.length) {
+    const tags = document.createElement("div");
+    tags.className = "card-tags";
+    tags.textContent = card.tags.join(" · ");
+    back.appendChild(tags);
+  }
   return back;
 }
 
